@@ -239,7 +239,7 @@ function renderOutput({ results, HDR, summary }) {
       const td = tr.cells[ci];
       if (!td) return;
       const v = parseFloat(td.textContent.replace(/,/g, ''));
-      if (!isNaN(v)) td.classList.add(v > 0 ? 'pos' : v < 0 ? 'neg' : '');
+      if (!isNaN(v) && v !== 0) td.classList.add(v > 0 ? 'pos' : 'neg');
     });
   });
 
