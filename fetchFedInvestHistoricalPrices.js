@@ -6,12 +6,15 @@
 
 const URL = "https://www.treasurydirect.gov/GA-FI/FedInvest/securityPriceDetail";
 
-function mostRecentWeekday(date = new Date()) {
-    const d = new Date(date);
-    const day = d.getDay();
-    if (day === 0) d.setDate(d.getDate() - 2); // Sunday → Friday
-    if (day === 6) d.setDate(d.getDate() - 1); // Saturday → Friday
-    return d;
+function mostRecentWeekday() {
+    // Use ET timezone so date matches FedInvest (which publishes by ET date)
+    const etStr = new Date().toLocaleDateString("en-CA", { timeZone: "America/New_York" });
+    const [y, m, d] = etStr.split("-").map(Number);
+    const date = new Date(y, m - 1, d);
+    const day = date.getDay();
+    if (day === 0) date.setDate(date.getDate() - 2);
+    if (day === 6) date.setDate(date.getDate() - 1);
+    return date;
 }
 
 async function fetchHistoricalPrices() {
