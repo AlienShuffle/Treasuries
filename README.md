@@ -79,7 +79,7 @@ e.g.  0.46 × 9.1 (2036) + 0.54 × 12.1 (2040) = 10.7
 | Reference CPI | BLS (via TreasuryDirect) | Monthly |
 | TIPS metadata (coupon, base CPI) | TreasuryDirect securities list | As needed |
 
-Prices are fetched from FedInvest once daily and committed to the repository via GitHub Actions. CSV data is served from Cloudflare R2.
+Prices are fetched from FedInvest once daily by GitHub Actions and uploaded to Cloudflare R2. The app fetches the CSV data directly from R2.
 
 ---
 
