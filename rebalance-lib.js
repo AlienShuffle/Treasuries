@@ -278,6 +278,29 @@ export function identifyBrackets(gapYears, holdings, yearInfo) {
 //   settlementDate — Date (from TipsYields.csv settlementDate field)
 //
 // Returns: { results, HDR, summary }
+// Binary search DARA such that full rebalance target cost ≈ current portfolio cash.
+// Call this before runRebalance when method='Full' and DARA is unknown.
+export function inferDARAFromCash({ holdings: holdingsRaw, tipsMap, refCPI, settlementDate }) {
+  let portfolioCash = 0;
+  for (const h of holdingsRaw) {
+    const bond = tipsMap.get(h.cusip);
+    if (!bond) continue;
+    const ir = refCPI / (bond.baseCpi ?? refCPI);
+    portfolioCash += h.qty * (bond.price ?? 0) / 100 * ir * 1000;
+  }
+  let lo = 1000, hi = 500000, foundDARA = (lo + hi) / 2;
+  for (let i = 0; i < 60; i++) {
+    const mid = (lo + hi) / 2;
+    const { summary } = runRebalance({ dara: mid, method: 'Full', holdings: holdingsRaw, tipsMap, refCPI, settlementDate });
+    const targetCost = portfolioCash - summary.costDeltaSum;
+    if (Math.abs(targetCost - portfolioCash) < 50) { foundDARA = mid; break; }
+    if (targetCost < portfolioCash) lo = mid; else hi = mid;
+    foundDARA = mid;
+  }
+  return { dara: foundDARA, portfolioCash };
+}
+
+
 export function runRebalance({ dara, method, holdings: holdingsRaw, tipsMap, refCPI, settlementDate }) {
   const settleDateStr  = toDateStr(settlementDate);
   const settleDateDisp = fmtDate(settlementDate);
@@ -358,14 +381,24 @@ export function runRebalance({ dara, method, holdings: holdingsRaw, tipsMap, ref
     araByYear[year] = yearPrincipal + yearLastYearInterest + laterMatInt;
   }
 
+  // Gap years have no holdings but still receive later maturity interest from longer bonds.
+  // Include their ARA in araSum so inferred DARA is not underestimated.
+  for (const gapYear of gapYears) {
+    let laterMatInt = 0;
+    for (const y in araLaterMaturityInterestByYear) {
+      if (parseInt(y) > gapYear) laterMatInt += araLaterMaturityInterestByYear[y];
+    }
+    araByYear[gapYear] = laterMatInt;
+  }
+
   let araSum = 0;
   for (let year = firstYear; year <= lastYear; year++) {
     if (araByYear[year] !== undefined) araSum += araByYear[year];
   }
   const rungCount    = lastYear - firstYear + 1;
   const inferredDARA = araSum / rungCount;
-  const DARA         = dara !== null ? dara : inferredDARA;
   const isFullMode   = (method === 'Full');
+  const DARA         = dara !== null ? dara : inferredDARA;
 
   // Phase 2: Gap parameters
   const gapParams = calculateGapParameters(gapYears, settlementDate, refCPI, tipsMap, DARA, holdings);
@@ -659,19 +692,25 @@ export function runRebalance({ dara, method, holdings: holdingsRaw, tipsMap, ref
       costDelta  = s.costDelta;
     }
 
-    let excessBefore = '', excessAfter = '';
-    const bt = buySellTargets[h.year];
-    if (bt?.isBracket && h.cusip === bt.targetCUSIP) {
-      excessBefore = bt.currentExcessCost;
-      excessAfter  = (bt.postRebalQty - bt.targetFYQty) * bt.costPerBond;
-    }
-
     const bond = tipsMap.get(h.cusip);
     const coupon  = bond?.coupon  ?? 0;
     const baseCpi = bond?.baseCpi ?? refCPI;
     const indexRatio = refCPI / baseCpi;
     if (!outputLaterMaturityInterest[h.year]) outputLaterMaturityInterest[h.year] = 0;
     outputLaterMaturityInterest[h.year] += h.qty * 1000 * indexRatio * coupon;
+
+    const monthFX     = h.maturity.getMonth() + 1;
+    const nPerFX      = monthFX < 7 ? 1 : 2;
+    const piPerBondFX = 1000 * indexRatio * (1 + coupon / 2 * nPerFX);
+
+    let excessBefore = '', excessAfter = '';
+    const bt = buySellTargets[h.year];
+    if (bt?.isBracket && h.cusip === bt.targetCUSIP) {
+      const exQtyBef = h.qty - (bracketTargetFYQtyBefore[h.year] ?? 0);
+      const exQtyAft = bt.postRebalQty - bt.targetFYQty;
+      excessBefore = exQtyBef * piPerBondFX;
+      excessAfter  = exQtyAft * piPerBondFX;
+    }
 
     // ── Detail for drill-down ──────────────────────────────────────────────────
         {
@@ -684,6 +723,7 @@ export function runRebalance({ dara, method, holdings: holdingsRaw, tipsMap, ref
           const dCPB     = dPrice / 100 * dIR * 1000;
           const dMonthF  = h.maturity.getMonth() + 1;
           const dNPer    = dMonthF < 7 ? 1 : 2;
+          const dPIPB    = dPPB * (1 + dCoupon / 2 * dNPer);
           const dBT      = buySellTargets[h.year];
           const dIsBT    = !!(dBT?.isBracket && h.cusip === dBT.targetCUSIP);
           const dIsTarget= !!(dBT && h.cusip === dBT.targetCUSIP);
@@ -702,8 +742,8 @@ export function runRebalance({ dara, method, holdings: holdingsRaw, tipsMap, ref
             principalPerBond: dPPB, costPerBond: dCPB,
             qtyBefore: h.qty, qtyAfter: dQtyAfter, fyQty: dFYQty,
             excessQtyBefore: dExQtyBef, excessQtyAfter: dExQtyAft,
-            excessCostBefore: dIsBT ? dBT.currentExcessCost : 0,
-            excessCostAfter:  dIsBT ? dExQtyAft * dCPB : 0,
+            excessARABefore: dIsBT ? dExQtyBef * dPIPB : 0,
+            excessARAAfter:  dIsBT ? dExQtyAft * dPIPB : 0,
             DARA,
             araBeforePrincipal:   dBComp?.principal   ?? null,
             araBeforeOwnCoupon:   dBComp?.ownCoupon   ?? null,
@@ -758,11 +798,11 @@ export function runRebalance({ dara, method, holdings: holdingsRaw, tipsMap, ref
   const HDR = ['CUSIP','Qty','Maturity','FY','Principal','Interest','ARA','Cost',
                'Target Qty','Qty Delta','Target Cost','Cost Delta',
                'ARA (Before)','ARA-DARA Before','ARA (After)','ARA-DARA After',
-               'Excess $ Before','Excess $ After'];
+               'Excess ARA Before','Excess ARA After'];
 
   const summary = {
     settleDateDisp, refCPI, DARA, inferredDARA, method,
-    firstYear, lastYear, rungCount, gapYears,
+    firstYear, lastYear, rungCount, gapYears, araByYear,
     gapParams, brackets,
     lowerDuration, upperDuration, lowerWeight, upperWeight,
     beforeLowerWeight, beforeUpperWeight, afterLowerWeight, afterUpperWeight,

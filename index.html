@@ -219,7 +219,7 @@ e.g.  0.46 × 9.1 (2036) + 0.54 × 12.1 (2040) = 10.7</pre>
 </div>
 
 <script type="module">
-import { buildTipsMapFromYields, localDate, runRebalance } from './rebalance-lib.js';
+import { buildTipsMapFromYields, localDate, runRebalance, inferDARAFromCash } from './rebalance-lib.js';
 import { runBuildFromScratch } from './build-lib.js';
 
 // ─── Help modal ───────────────────────────────────────────────────────────────
@@ -376,6 +376,7 @@ document.querySelectorAll('.mode-btn').forEach(btn => {
     document.getElementById('field-holdings').style.display  = isRebalance ? '' : 'none';
     document.getElementById('field-method').style.display    = isRebalance ? '' : 'none';
     document.getElementById('field-last-year').style.display = isRebalance ? 'none' : '';
+    if (isRebalance) syncDaraVisibility(); else { document.getElementById('dara').closest('.field').style.display = ''; }
     document.getElementById('run-btn').textContent = isRebalance ? 'Run Rebalance' : 'Build Ladder';
 
     document.getElementById('output').style.display     = isRebalance && rebalanceRendered ? 'block' : 'none';
@@ -388,7 +389,7 @@ document.querySelectorAll('.mode-btn').forEach(btn => {
 });
 
 // ─── Render rebalance output ──────────────────────────────────────────────────
-function renderOutput({ results, HDR, summary, details }) {
+function renderOutput({ results, HDR, summary, details }, portfolioCash = null) {
   const {
     settleDateDisp, refCPI, DARA, inferredDARA, method,
     firstYear, lastYear, rungCount, gapYears,
@@ -415,7 +416,8 @@ function renderOutput({ results, HDR, summary, details }) {
     param('Inferred DARA', fmtI(inferredDARA)) +
     param('Method',        esc(method)) +
     param('Range',         `${firstYear} – ${lastYear} (${rungCount} rungs)`) +
-    param('Gap Years',     gapYears.join(', ') || '—');
+    param('Gap Years',     gapYears.join(', ') || '—') +
+    (portfolioCash !== null ? param('Portfolio Cash', '$' + Math.round(portfolioCash).toLocaleString()) : '');
 
   rebalDetails = details;
 
@@ -620,9 +622,15 @@ document.getElementById('run-btn').addEventListener('click', async () => {
       if (holdingsRaw.size === 0) { setStatus('Holdings CSV has no valid data rows.', true); return; }
       const holdings = Array.from(holdingsRaw, ([cusip, qty]) => ({ cusip, qty }));
 
+      let finalDara = dara;
+      let portfolioCash = null;
+      if (method === 'Full') {
+        setStatus('Inferring DARA from portfolio cash…');
+        ({ dara: finalDara, portfolioCash } = inferDARAFromCash({ holdings, tipsMap, refCPI, settlementDate }));
+      }
       setStatus('Running rebalance…');
-      const result = runRebalance({ dara, method, holdings, tipsMap, refCPI, settlementDate });
-      renderOutput(result);
+      const result = runRebalance({ dara: finalDara, method, holdings, tipsMap, refCPI, settlementDate });
+      renderOutput(result, portfolioCash);
       setStatus('');
     }
   } catch (err) {
@@ -915,6 +923,14 @@ document.getElementById('simple-table').addEventListener('click', e => {
 });
 
 // ─── Init ─────────────────────────────────────────────────────────────────────
+// ─── Method toggle: hide DARA for Full rebalance ───────────────────────────────────────
+function syncDaraVisibility() {
+  const isFull = document.getElementById('method').value === 'Full';
+  const daraField = document.getElementById('dara').closest('.field');
+  daraField.style.display = isFull ? 'none' : '';
+}
+document.getElementById('method').addEventListener('change', syncDaraVisibility);
+
 loadData();
 </script>
 </body>
