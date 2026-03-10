@@ -57,6 +57,8 @@ function calcGapParams(gapYears, tipsMap, settlementDate, refCPI, dara, prelim) 
 // Upper bracket: always 2040.
 //
 // Returns: { results, HDR, summary }
+// Spec: knowledge/3.0_TIPS_Ladders.md and knowledge/4.0_TIPS_Ladder_Rebalancing.md §Full Rebalance
+// Variable naming note: fy_qty=fyQty, ex_qty=excessQtyAfter, fy_costPerBond=costPerBond — see §Code Variable Mapping
 export function runBuildFromScratch({ dara, lastYear, tipsMap, refCPI, settlementDate }) {
   const firstYear      = settlementDate.getFullYear();
   const settleDateDisp = fmtDate(settlementDate);

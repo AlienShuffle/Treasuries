@@ -301,6 +301,7 @@ export function inferDARAFromCash({ holdings: holdingsRaw, tipsMap, refCPI, sett
 }
 
 
+// Spec: knowledge/4.0_TIPS_Ladder_Rebalancing.md — Algorithm Flow (Gap-Only) and Full Rebalance
 export function runRebalance({ dara, method, holdings: holdingsRaw, tipsMap, refCPI, settlementDate }) {
   const settleDateStr  = toDateStr(settlementDate);
   const settleDateDisp = fmtDate(settlementDate);
