@@ -3,6 +3,13 @@
 //
 // Entry point:  runRebalance({ dara, method, holdings, tipsMap, refCPI, settlementDate })
 // Data loading: buildTipsMapFromYields(rows) — build tipsMap from TipsYields.csv rows
+// Spec: knowledge/4.0_TIPS_Ladder_Rebalancing.md
+
+import { bondCalcs, calculateMDuration, rungAmount } from './bond-math.js';
+import { interpolateYield, syntheticCoupon, bracketWeights, bracketExcessQtys, fyQty as _fyQty, laterMatIntContribution } from './gap-math.js';
+
+// Re-export bond-math functions that external callers depend on
+export { calculateDuration, calculateMDuration, getNumPeriods } from './bond-math.js';
 
 // ─── Configuration ────────────────────────────────────────────────────────────
 export const LOWEST_LOWER_BRACKET_YEAR = 2032;
@@ -115,42 +122,16 @@ export function yieldFromPrice(cleanPrice, coupon, settleDateStr, maturityStr) {
   return y;
 }
 
-// ─── Duration calculations ────────────────────────────────────────────────────
-export function getNumPeriods(settlement, maturity) {
-  const months = (maturity.getFullYear() - settlement.getFullYear()) * 12 +
-                 (maturity.getMonth() - settlement.getMonth());
-  return Math.ceil(months / 6);
-}
-
-export function calculateDuration(settlement, maturity, coupon, yld) {
-  const settle = new Date(settlement);
-  const mature = new Date(maturity);
-  const periods = getNumPeriods(settle, mature);
-  let weightedSum = 0, pvSum = 0;
-  for (let i = 1; i <= periods; i++) {
-    const cashflow = i === periods ? 1000 + coupon * 1000 / 2 : coupon * 1000 / 2;
-    const pv = cashflow / Math.pow(1 + yld / 2, i);
-    weightedSum += i * pv;
-    pvSum += pv;
-  }
-  return weightedSum / pvSum / 2;
-}
-
-export function calculateMDuration(settlement, maturity, coupon, yld) {
-  return calculateDuration(settlement, maturity, coupon, yld) / (1 + yld / 2);
-}
-
 // ─── P+I per bond ─────────────────────────────────────────────────────────────
 export function calculatePIPerBond(cusip, maturity, refCPI, tipsMap) {
   const bond = tipsMap.get(cusip);
-  const coupon  = bond?.coupon  ?? 0;
-  const baseCpi = bond?.baseCpi ?? refCPI;
-  const indexRatio = refCPI / baseCpi;
-  const adjustedPrincipal = 1000 * indexRatio;
-  const adjustedAnnualInterest = adjustedPrincipal * coupon;
-  const monthF = new Date(maturity).getMonth() + 1;
-  const lastYearInterest = monthF < 7 ? adjustedAnnualInterest * 0.5 : adjustedAnnualInterest * 1.0;
-  return adjustedPrincipal + lastYearInterest;
+  if (!bond) {
+    // fallback: no bond data, return face value only
+    return 1000;
+  }
+  // Use maturity date from argument (may differ from bond.maturity in edge cases)
+  const bondWithMaturity = { ...bond, maturity: new Date(maturity) };
+  return bondCalcs(bondWithMaturity, refCPI).piPerBond;
 }
 
 // ─── Gap parameters ───────────────────────────────────────────────────────────
@@ -220,19 +201,17 @@ export function calculateGapParameters(gapYears, settlementDate, refCPI, tipsMap
   let totalDuration = 0, totalCost = 0, count = 0;
   for (const year of [...gapYears].sort((a, b) => b - a)) {
     const syntheticMat = new Date(year, 1, 15);
-    const syntheticYield = anchorBefore.yield +
-      (syntheticMat - anchorBefore.maturity) * (anchorAfter.yield - anchorBefore.yield) /
-      (anchorAfter.maturity - anchorBefore.maturity);
-    const syntheticCoupon = Math.max(0.00125, Math.floor(syntheticYield * 100 / 0.125) * 0.00125);
+    const syntheticYield = interpolateYield(anchorBefore, { maturity: anchorAfter.maturity, yield: anchorAfter.yield }, syntheticMat);
+    const synCpn = syntheticCoupon(syntheticYield);
 
-    totalDuration += calculateMDuration(settlementDate, syntheticMat, syntheticCoupon, syntheticYield);
+    totalDuration += calculateMDuration(settlementDate, syntheticMat, synCpn, syntheticYield);
 
     let sumLaterMaturityInterest = 0;
     for (const futYear in gapLaterMaturityInterest) {
       if (parseInt(futYear) > year) sumLaterMaturityInterest += gapLaterMaturityInterest[futYear];
     }
 
-    const piPerBond = 1000 + 1000 * syntheticCoupon * 0.5;
+    const piPerBond = 1000 + 1000 * synCpn * 0.5;
     const qty = Math.round((DARA - sumLaterMaturityInterest) / piPerBond);
     totalCost += qty * 1000;
     count++;
@@ -412,8 +391,7 @@ export function runRebalance({ dara, method, holdings: holdingsRaw, tipsMap, ref
     lowerBond?.coupon ?? 0, lowerBond?.yield ?? 0);
   const upperDuration = calculateMDuration(settlementDate, brackets.upperMaturity,
     upperBond?.coupon ?? 0, upperBond?.yield ?? 0);
-  const lowerWeight   = (upperDuration - gapParams.avgDuration) / (upperDuration - lowerDuration);
-  const upperWeight   = 1 - lowerWeight;
+  const { lowerWeight, upperWeight } = bracketWeights(lowerDuration, upperDuration, gapParams.avgDuration);
 
   // Phase 3b: Before-state bracket excess (display only)
   const bracketYearSet = new Set([brackets.lowerYear, brackets.upperYear]);
@@ -601,10 +579,9 @@ export function runRebalance({ dara, method, holdings: holdingsRaw, tipsMap, ref
     postRebalQtyMap[targetCUSIP] = postRebalQty;
     for (const h of yi.holdings) {
       const bond = tipsMap.get(h.cusip);
-      const c  = bond?.coupon  ?? 0;
-      const bc = bond?.baseCpi ?? refCPI;
-      const ir = refCPI / bc;
-      rebuildLaterMatInt += postRebalQtyMap[h.cusip] * 1000 * ir * c;
+      if (!bond) continue;
+      const { annualInt } = bondCalcs(bond, refCPI);
+      rebuildLaterMatInt += laterMatIntContribution(postRebalQtyMap[h.cusip], annualInt);
     }
   }
 
@@ -766,11 +743,11 @@ export function runRebalance({ dara, method, holdings: holdingsRaw, tipsMap, ref
           const dBComp      = dLast ? beforeARACompByYear[h.year] : null;
           const dAComp      = dLast ? afterARACompByYear[h.year]  : null;
           details.unshift({
-            cusip: h.cusip, maturityStr: fmtDate(h.maturity), fy: h.year,
+            cusip: h.cusip, maturityStr: fmtDate(h.maturity), fundedYear: h.year,
             nPeriods: dNPer, isLastInYear: dLast, isBracketTarget: dIsBT,
             coupon: dCoupon, price: dPrice, baseCpi: dBase, refCPI, indexRatio: dIR,
             principalPerBond: dPPB, costPerBond: dCPB,
-            qtyBefore: h.qty, qtyAfter: dQtyAfter, fyQty: dFYQty,
+            qtyBefore: h.qty, qtyAfter: dQtyAfter, fundedYearQty: dFYQty,
             excessQtyBefore: dExQtyBef, excessQtyAfter: dExQtyAft,
             excessARABefore: dIsBT ? dExQtyBef * dPIPB : 0,
             excessARAAfter:  dIsBT ? dExQtyAft * dPIPB : 0,

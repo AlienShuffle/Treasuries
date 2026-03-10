@@ -1,9 +1,11 @@
 // TIPS Ladder Builder — Build from Scratch
 // Pure computation only — no Node.js I/O, no file system, no CLI.
 //
-// Entry point: runBuildFromScratch({ dara, lastYear, tipsMap, refCPI, settlementDate })
+// Entry point: runBuild({ dara, lastYear, tipsMap, refCPI, settlementDate })
 
-import { calculatePIPerBond, calculateMDuration, fmtDate } from './rebalance-lib.js';
+import { fmtDate } from './rebalance-lib.js';
+import { bondCalcs, calculateMDuration, rungAmount } from './bond-math.js';
+import { interpolateYield, syntheticCoupon as _synCoupon, bracketWeights, bracketExcessQtys, fyQty as _fyQty } from './gap-math.js';
 
 // ─── Gap parameters for build-from-scratch ─────────────────────────────────────
 // prelim: { [year]: { targetFYQty, annualInterest } }
@@ -24,10 +26,8 @@ function calcGapParams(gapYears, tipsMap, settlementDate, refCPI, dara, prelim) 
   let totalDuration = 0, totalCost = 0;
   for (const year of [...gapYears].sort((a, b) => b - a)) {
     const synMat = new Date(year, 1, 15); // Feb 15
-    const synYld = anchorBefore.yield +
-      (synMat - anchorBefore.maturity) * (anchorAfter.yield - anchorBefore.yield) /
-      (anchorAfter.maturity - anchorBefore.maturity);
-    const synCpn = Math.max(0.00125, Math.floor(synYld * 100 / 0.125) * 0.00125);
+    const synYld = interpolateYield(anchorBefore, anchorAfter, synMat);
+    const synCpn = _synCoupon(synYld);
 
     totalDuration += calculateMDuration(settlementDate, synMat, synCpn, synYld);
 
@@ -38,7 +38,7 @@ function calcGapParams(gapYears, tipsMap, settlementDate, refCPI, dara, prelim) 
     }
 
     const piPerBond = 1000 + 1000 * synCpn * 0.5;
-    totalCost += Math.max(0, Math.round((dara - laterMatInt) / piPerBond)) * 1000;
+    totalCost += _fyQty(dara, laterMatInt, piPerBond) * 1000;
   }
 
   return { avgDuration: totalDuration / gapYears.length, totalCost };
@@ -58,8 +58,8 @@ function calcGapParams(gapYears, tipsMap, settlementDate, refCPI, dara, prelim) 
 //
 // Returns: { results, HDR, summary }
 // Spec: knowledge/3.0_TIPS_Ladders.md and knowledge/4.0_TIPS_Ladder_Rebalancing.md §Full Rebalance
-// Variable naming note: fy_qty=fyQty, ex_qty=excessQtyAfter, fy_costPerBond=costPerBond — see §Code Variable Mapping
-export function runBuildFromScratch({ dara, lastYear, tipsMap, refCPI, settlementDate }) {
+// Variable naming note: fundedYearQty, excessQty, costPerBond (harmonized) — see §Code Variable Mapping
+export function runBuild({ dara, lastYear, tipsMap, refCPI, settlementDate }) {
   const firstYear      = settlementDate.getFullYear();
   const settleDateDisp = fmtDate(settlementDate);
 
@@ -103,11 +103,11 @@ export function runBuildFromScratch({ dara, lastYear, tipsMap, refCPI, settlemen
   let laterMatInt = 0;
   for (const year of [...rangeYears].sort((a, b) => b - a)) {
     const bond = yearBondMap[year];
-    const pi   = calculatePIPerBond(bond.cusip, bond.maturity, refCPI, tipsMap);
-    const qty  = Math.max(0, Math.round((dara - laterMatInt) / pi));
+    const pi   = bondCalcs(bond, refCPI).piPerBond;
+    const qty  = _fyQty(dara, laterMatInt, pi);
     const ir   = refCPI / (bond.baseCpi ?? refCPI);
     const ann  = qty * 1000 * ir * (bond.coupon ?? 0);
-    prelim[year] = { targetFYQty: qty, annualInterest: ann, laterMatInt, pi };
+    prelim[year] = { targetFundedYearQty: qty, annualInterest: ann, laterMatInt, pi };
     laterMatInt += ann;
   }
 
@@ -116,18 +116,16 @@ export function runBuildFromScratch({ dara, lastYear, tipsMap, refCPI, settlemen
 
   const lowerBond = yearBondMap[lowerYear];
   const upperBond = yearBondMap[upperYear];
-  const lowerDur  = calculateMDuration(settlementDate, lowerBond.maturity, lowerBond.coupon ?? 0, lowerBond.yield ?? 0);
-  const upperDur  = calculateMDuration(settlementDate, upperBond.maturity, upperBond.coupon ?? 0, upperBond.yield ?? 0);
-  const lowerWt   = (upperDur - gapParams.avgDuration) / (upperDur - lowerDur);
-  const upperWt   = 1 - lowerWt;
+  const lowerDuration = calculateMDuration(settlementDate, lowerBond.maturity, lowerBond.coupon ?? 0, lowerBond.yield ?? 0);
+  const upperDuration = calculateMDuration(settlementDate, upperBond.maturity, upperBond.coupon ?? 0, upperBond.yield ?? 0);
+  const { lowerWeight, upperWeight } = bracketWeights(lowerDuration, upperDuration, gapParams.avgDuration);
 
   const BL_MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   const lowerMonth = BL_MONTHS[lowerBond.maturity.getMonth()];
   const upperMonth = BL_MONTHS[upperBond.maturity.getMonth()];
-  const lowerCPB  = (lowerBond.price ?? 0) / 100 * (refCPI / (lowerBond.baseCpi ?? refCPI)) * 1000;
-  const upperCPB  = (upperBond.price ?? 0) / 100 * (refCPI / (upperBond.baseCpi ?? refCPI)) * 1000;
-  const lowerExQty     = lowerCPB > 0 ? Math.round(gapParams.totalCost * lowerWt / lowerCPB) : 0;
-  const upperExQty     = upperCPB > 0 ? Math.round(gapParams.totalCost * upperWt / upperCPB) : 0;
+  const lowerCPB = (lowerBond.price ?? 0) / 100 * (refCPI / (lowerBond.baseCpi ?? refCPI)) * 1000;
+  const upperCPB = (upperBond.price ?? 0) / 100 * (refCPI / (upperBond.baseCpi ?? refCPI)) * 1000;
+  const { lowerExQty, upperExQty } = bracketExcessQtys(gapParams.totalCost, lowerWeight, upperWeight, lowerCPB, upperCPB);
   const totalExcessCost = lowerExQty * lowerCPB + upperExQty * upperCPB;
 
   // 5. Build output rows (ascending year order for display)
@@ -136,35 +134,34 @@ export function runBuildFromScratch({ dara, lastYear, tipsMap, refCPI, settlemen
   let totalBuyCost = 0;
   for (const year of rangeYears) {
     const bond      = yearBondMap[year];
-    const fyQty     = prelim[year].targetFYQty;
-    const exQty     = year === lowerYear ? lowerExQty : year === upperYear ? upperExQty : 0;
-    const totQty    = fyQty + exQty;
-    const ir        = Math.round(refCPI / (bond.baseCpi ?? refCPI) * 1e5) / 1e5;
-    const cpb       = (bond.price ?? 0) / 100 * ir * 1000;
-    const isBracket = exQty > 0;
+    const fundedYearQty = prelim[year].targetFundedYearQty;
+    const excessQty  = year === lowerYear ? lowerExQty : year === upperYear ? upperExQty : 0;
+    const totQty     = fundedYearQty + excessQty;
+    const { indexRatio: ir, costPerBond: cpb } = bondCalcs(bond, refCPI);
+    const isBracket = excessQty > 0;
     const monthF    = bond.maturity.getMonth() + 1;
     const halfOrFull = monthF < 7 ? 0.5 : 1.0;
     const principalPerBond     = 1000 * ir;
     const ownRungCouponPerBond = principalPerBond * (bond.coupon ?? 0) * halfOrFull;
-    const fyAmt  = fyQty * prelim[year].pi + prelim[year].laterMatInt;
-    const exAmt  = isBracket ? exQty * prelim[year].pi : '';
-    const fyCost = fyQty * cpb;
-    const exCost = isBracket ? exQty * cpb : '';
+    const fundedYearAmt = fundedYearQty * prelim[year].pi + prelim[year].laterMatInt;
+    const exAmt  = isBracket ? excessQty * prelim[year].pi : '';
+    const fundedYearCost = fundedYearQty * cpb;
+    const exCost = isBracket ? excessQty * cpb : '';
     totalBuyCost += totQty * cpb;
     results.push([
       bond.cusip,             // 0: CUSIP
       fmtDate(bond.maturity), // 1: Maturity
       year,                   // 2: FY
-      fyQty,                  // 3: FY Qty
-      exQty || '',            // 4: Excess Qty (blank for non-bracket years)
+      fundedYearQty,         // 3: Funded Year Qty
+      excessQty || '',       // 4: Excess Qty (blank for non-bracket years)
       totQty,                 // 5: Total Qty
-      fyAmt,                  // 6: FY Amount
-      fyCost,                 // 7: FY Cost
+      fundedYearAmt,         // 6: Funded Year Amount
+      fundedYearCost,        // 7: Funded Year Cost
       exAmt,                  // 8: Excess Amount (bracket only)
       exCost,                 // 9: Excess Cost (bracket only)
     ]);
     details.push({
-      fy: year,
+      fundedYear: year,
       cusip: bond.cusip,
       maturityStr: fmtDate(bond.maturity),
       coupon: bond.coupon ?? 0,
@@ -174,29 +171,29 @@ export function runBuildFromScratch({ dara, lastYear, tipsMap, refCPI, settlemen
       indexRatio: ir,
       halfOrFull,
       dara,
-      fy_qty: fyQty,
-      fy_laterMatInt: prelim[year].laterMatInt,
-      fy_pi: prelim[year].pi,
-      fy_principalTotal: fyQty * principalPerBond,
-      fy_ownRungInt: fyQty * ownRungCouponPerBond,
-      fy_amt: fyAmt,
-      fy_costPerBond: cpb,
-      fy_cost: fyCost,
-      ex_qty: exQty,
-      ex_principalTotal: exQty * principalPerBond,
-      ex_ownRungInt: exQty * ownRungCouponPerBond,
-      ex_amt: isBracket ? exQty * prelim[year].pi : 0,
-      ex_cost: isBracket ? exQty * cpb : 0,
+      fundedYearQty: fundedYearQty,
+      fundedYearLaterMatInt: prelim[year].laterMatInt,
+      fundedYearPi: prelim[year].pi,
+      fundedYearPrincipalTotal: fundedYearQty * principalPerBond,
+      fundedYearOwnRungInt: fundedYearQty * ownRungCouponPerBond,
+      fundedYearAmt: fundedYearAmt,
+      costPerBond: cpb,
+      fundedYearCost: fundedYearCost,
+      excessQty: excessQty,
+      excessPrincipalTotal: excessQty * principalPerBond,
+      excessOwnRungInt: excessQty * ownRungCouponPerBond,
+      excessAmt: isBracket ? excessQty * prelim[year].pi : 0,
+      excessCost: isBracket ? excessQty * cpb : 0,
     });
   }
 
-  const HDR = ['CUSIP', 'Maturity', 'FY', 'FY Qty', 'Excess Qty', 'Total Qty', 'FY Amount', 'FY Cost', 'Excess Amount', 'Excess Cost'];
+  const HDR = ['CUSIP', 'Maturity', 'Funded Year', 'Funded Year Qty', 'Excess Qty', 'Total Qty', 'Funded Year Amount', 'Funded Year Cost', 'Excess Amount', 'Excess Cost'];
 
   const summary = {
     settleDateDisp, refCPI, dara,
     firstYear, lastYear, gapYears,
     gapParams, lowerYear, upperYear,
-    lowerDur, upperDur, lowerWt, upperWt, lowerMonth, upperMonth,
+    lowerDuration, upperDuration, lowerWeight, upperWeight, lowerMonth, upperMonth,
     lowerExQty, upperExQty, totalExcessCost,
     totalBuyCost,
   };

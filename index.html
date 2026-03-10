@@ -35,10 +35,10 @@
   #status.error { color: #c0392b; font-weight: 600; }
 
   /* ── Net Cash / Total Cost callout ── */
-  #net-cash-bar, #bfs-net-cash-bar { display: none; background: #fff; border: 1px solid #ddd; border-radius: 6px;
+  #net-cash-bar, #build-net-cash-bar { display: none; background: #fff; border: 1px solid #ddd; border-radius: 6px;
                   padding: 10px 20px; flex-direction: column; justify-content: center; }
-  #net-cash-bar .nc-label, #bfs-net-cash-bar .nc-label { font-size: 10px; font-weight: 600; color: #888; text-transform: uppercase; letter-spacing: .04em; }
-  #net-cash-bar .nc-val, #bfs-net-cash-bar .nc-val { font-size: 22px; font-weight: 700; margin-top: 2px; line-height: 1; }
+  #net-cash-bar .nc-label, #build-net-cash-bar .nc-label { font-size: 10px; font-weight: 600; color: #888; text-transform: uppercase; letter-spacing: .04em; }
+  #net-cash-bar .nc-val, #build-net-cash-bar .nc-val { font-size: 22px; font-weight: 700; margin-top: 2px; line-height: 1; }
 
   /* ── Parameters bar ── */
   .params-bar { display: flex; flex-wrap: wrap; gap: 0; background: #fff; border: 1px solid #ddd; border-radius: 6px; padding: 10px 16px; margin-bottom: 12px; }
@@ -99,7 +99,7 @@
 
 
   #output     { display: none; }
-  #bfs-output { display: none; }
+  #build-output { display: none; }
 </style>
 <script data-goatcounter="https://tipsladder.goatcounter.com/count"
         async src="//gc.zgo.at/count.js"></script>
@@ -148,7 +148,7 @@
 
     <h3 style="font-size:13px;margin:16px 0 6px;border-bottom:1px solid #eee;padding-bottom:4px;">Duration Matching</h3>
     <p>Synthetic TIPS are created for gap years using yield interpolation between the bracket anchors. Excess bonds are split between the lower and upper bracket so their weighted duration matches the average duration of the gap years:</p>
-    <pre style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:4px;padding:8px;font-size:12px;margin:6px 0;">lowerWt × lowerDur + upperWt × upperDur = gapAvgDuration
+    <pre style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:4px;padding:8px;font-size:12px;margin:6px 0;">lowerWeight × lowerDuration + upperWeight × upperDuration = gapAvgDuration
 e.g.  0.46 × 9.1 (2036) + 0.54 × 12.1 (2040) = 10.7</pre>
   </div>
 </div>
@@ -200,9 +200,9 @@ e.g.  0.46 × 9.1 (2036) + 0.54 × 12.1 (2040) = 10.7</pre>
     <div class="nc-label">Net Cash</div>
     <div class="nc-val" id="net-cash-val"></div>
   </div>
-  <div id="bfs-net-cash-bar">
+  <div id="build-net-cash-bar">
     <div class="nc-label">Total Cost</div>
-    <div class="nc-val" id="bfs-net-cash-val"></div>
+    <div class="nc-val" id="build-net-cash-val"></div>
   </div>
 </div>
 
@@ -217,18 +217,24 @@ e.g.  0.46 × 9.1 (2036) + 0.54 × 12.1 (2040) = 10.7</pre>
 </div>
 
 <!-- Build from Scratch output -->
-<div id="bfs-output">
-  <div class="params-bar" id="bfs-params-bar"></div>
+<div id="build-output">
+  <div class="params-bar" id="build-params-bar"></div>
   <div style="border:1px solid #ddd; border-radius:6px; background:#fff; padding:12px 16px;">
-    <div class="table-scroll-wrap" id="bfs-scroll">
-      <table class="simple" id="bfs-table"></table>
+    <div class="table-scroll-wrap" id="build-scroll">
+      <table class="simple" id="build-table"></table>
     </div>
   </div>
 </div>
 
 <script type="module">
 import { buildTipsMapFromYields, localDate, runRebalance, inferDARAFromCash } from './rebalance-lib.js';
-import { runBuildFromScratch } from './build-lib.js';
+import { runBuild } from './build-lib.js';
+import { renderTable } from './render.js';
+import { buildDrillHTML } from './drill.js';
+import { fetchTipsData } from './data.js';
+
+const simpleEl = document.getElementById('simple-table');
+const tableEl  = document.getElementById('build-table');
 
 // ─── Help modal ───────────────────────────────────────────────────────────────
 document.getElementById('help-btn').addEventListener('click', () => {
@@ -241,51 +247,17 @@ document.getElementById('help-overlay').addEventListener('click', e => {
   if (e.target === e.currentTarget) e.currentTarget.style.display = 'none';
 });
 
-// ─── CSV parser ───────────────────────────────────────────────────────────────
-function parseCsv(text) {
-  const lines = text.trim().split('\n').filter(l => l.trim());
-  if (lines.length < 2) return [];
-  const headers = lines[0].split(',').map(s => s.trim());
-  return lines.slice(1).map(line => {
-    const vals = line.split(',').map(s => s.trim());
-    const obj = {};
-    headers.forEach((h, i) => { obj[h] = vals[i] ?? ''; });
-    return obj;
-  });
-}
-
 // ─── Load data CSVs ───────────────────────────────────────────────────────────
 let tipsMap = null, refCpiRows = null, settlementDate = null;
 
 async function loadData() {
   const dataInfo = document.getElementById('data-info');
   try {
-    const [yieldsRes, refCpiRes] = await Promise.all([
-      fetch('https://pub-ba11062b177640459f72e0a88d0261ae.r2.dev/TIPS/TipsYields.csv'),
-      fetch('https://pub-ba11062b177640459f72e0a88d0261ae.r2.dev/TIPS/RefCPI.csv'),
-    ]);
-    if (!yieldsRes.ok) throw new Error(`TipsYields.csv: HTTP ${yieldsRes.status}`);
-    if (!refCpiRes.ok) throw new Error(`RefCPI.csv: HTTP ${refCpiRes.status}`);
-
-    const yieldsRows = parseCsv(await yieldsRes.text()).map(r => ({
-      settlementDate: r.settlementDate,
-      cusip:    r.cusip,
-      maturity: r.maturity,
-      coupon:   parseFloat(r.coupon),
-      baseCpi:  parseFloat(r.baseCpi),
-      price:    parseFloat(r.price)  || null,
-      yield:    parseFloat(r.yield)  || null,
-    }));
-
-    refCpiRows = parseCsv(await refCpiRes.text()).map(r => ({
-      date:   r.date,
-      refCpi: parseFloat(r.refCpi),
-    }));
-
+    const { yieldsRows, refCpiRows: rows } = await fetchTipsData();
+    refCpiRows = rows;
     const settleDateStr = yieldsRows[0]?.settlementDate;
     if (!settleDateStr) throw new Error('TipsYields.csv has no settlementDate');
     settlementDate = localDate(settleDateStr);
-
     tipsMap = buildTipsMapFromYields(yieldsRows);
 
     // Populate last-year dropdown with available TIPS maturity years
@@ -349,25 +321,14 @@ function sign(n) {
   return (r > 0 ? '+' : '') + r.toLocaleString();
 }
 
-function cell(v, ci) {
-  let s;
-  if (typeof v !== 'number') {
-    s = String(v);
-  } else if (ci === 1 || ci === 3) {
-    s = String(Math.round(v));
-  } else {
-    s = Math.round(v).toLocaleString('en-US');
-  }
-  return `<td class="${ci >= 4 ? 'num' : ''}">${esc(s)}</td>`;
-}
 
 // ─── Mode toggle ──────────────────────────────────────────────────────────────
 let currentMode = 'rebalance';
-let rebalanceRendered = false, bfsRendered = false;
-let bfsDetails = null;
+let rebalanceRendered = false, buildRendered = false;
+let buildDetails = null;
 let rebalDetails = null;
 let rebalSummary = null;
-let bfsSummary = null;
+let buildSummary = null;
 
 document.querySelectorAll('.mode-btn').forEach(btn => {
   btn.addEventListener('click', () => {
@@ -390,9 +351,9 @@ document.querySelectorAll('.mode-btn').forEach(btn => {
     document.getElementById('run-btn').textContent = isRebalance ? 'Run Rebalance' : 'Build Ladder';
 
     document.getElementById('output').style.display     = isRebalance && rebalanceRendered ? 'block' : 'none';
-    document.getElementById('bfs-output').style.display = !isRebalance && bfsRendered     ? 'block' : 'none';
+    document.getElementById('build-output').style.display = !isRebalance && buildRendered     ? 'block' : 'none';
     document.getElementById('net-cash-bar').style.display     = isRebalance && rebalanceRendered ? 'flex' : 'none';
-    document.getElementById('bfs-net-cash-bar').style.display = !isRebalance && bfsRendered ? 'flex' : 'none';
+    document.getElementById('build-net-cash-bar').style.display = !isRebalance && buildRendered ? 'flex' : 'none';
 
     setStatus('');
   });
@@ -430,141 +391,26 @@ function renderOutput({ results, HDR, summary, details }, portfolioCash = null) 
   rebalDetails = details;
   rebalSummary = summary;
 
-  // Simple view: CUSIP | Maturity | FY | Amount After | Amount Before | Excess After | Excess Before | Qty After | Qty Before | QtyΔ | CashΔ
-  const SCOLS = [
-    { label: 'CUSIP',         ci: 0,  fmt: 'str' },
-    { label: 'Maturity',      ci: 2,  fmt: 'str' },
-    { label: 'FY',            ci: 3,  fmt: 'fy'  },
-    { label: 'Amount Before',    ci: 12, fmt: 'amt', key: 'araBefore'    },
-    { label: 'Amount After',     ci: 14, fmt: 'amt', key: 'araAfter'     },
-    { label: 'Cost Before', ci: null, fmt: 'amt', key: 'costBefore' },
-    { label: 'Cost After',  ci: null, fmt: 'amt', key: 'costAfter'  },
-    { label: 'Qty Before',    ci: 1,  fmt: 'qty' },
-    { label: 'Qty After',     ci: 8,  fmt: 'qty', key: 'qtyAfter'     },
-    { label: 'Qty Δ',        ci: 9,  fmt: 'sgn' },
-    { label: 'Cash Δ',       ci: 11, fmt: 'sgn', key: 'cashDelta' },
-  ];
-  const simpleEl = document.getElementById('simple-table');
-  const simpleHeader = '<thead><tr>' + SCOLS.map(c => '<th>' + esc(c.label) + '</th>').join('') + '</tr></thead>';
-  // Helper: format a cell value for table display
-  function fmtCell(v, fmt) {
-    if (fmt === 'str' || fmt === 'fy') return String(v ?? '');
-    if (fmt === 'qty') return typeof v === 'number' ? String(Math.round(v)) : String(v ?? '');
-    if (fmt === 'sgn') {
-      if (typeof v !== 'number') return '';
-      const r2 = Math.round(v); return (r2 > 0 ? '+' : '') + r2.toLocaleString('en-US');
-    }
-    return typeof v === 'number' ? Math.round(v).toLocaleString('en-US') : String(v ?? '');
-  }
-  function fmtCls(v, fmt) {
-    return (fmt === 'sgn' && typeof v === 'number' && v !== 0) ? (v > 0 ? 'pos' : 'neg') : '';
-  }
+  const { headerHTML: rHdr, bodyHTML: rBody, tfootHTML: rFoot } = renderTable({ details, mode: 'rebal', summary });
+  simpleEl.innerHTML = rHdr + rBody + rFoot;
 
-  const simpleBody = results.map((r, ri) => {
-    const noChange = typeof r[9] === 'number' && r[9] === 0;
-    const d = details[ri];
-    const cells = SCOLS.map(({ ci, fmt, key }) => {
-      const isBT = d && d.isBracketTarget;
-      let v = key === 'costBefore' ? (d ? (isBT ? d.fyQty : d.qtyBefore) * d.costPerBond : null)
-              : key === 'costAfter'  ? (d ? d.fyQty * d.costPerBond : null)
-              : (isBT && ci === 1)  ? d.fyQty
-              : (isBT && key === 'qtyAfter') ? d.fyQty
-              : (isBT && ci === 9)  ? 0
-              : (isBT && key === 'cashDelta') ? 0
-              : (ci === 8 && r[8] === '') ? r[1] : r[ci];
-      let s = fmtCell(v, fmt), cls = fmtCls(v, fmt);
-      const clickable = key && d && (
-        (key === 'araAfter'     && d.araAfterTotal   !== null) ||
-        (key === 'araBefore'    && d.araBeforeTotal  !== null) ||
-        (key === 'qtyAfter'     && typeof v === 'number' && v > 0) ||
-        (key === 'cashDelta'    && typeof v === 'number' && v !== 0) ||
-        (key === 'costBefore'   && typeof v === 'number' && v > 0) ||
-        (key === 'costAfter'    && typeof v === 'number' && v > 0)
-      );
-      const drillCls = clickable
-        ? ' class="drillable' + (cls ? ' ' + cls : '') + '" data-row="' + ri + '" data-col="' + key + '"'
-        : (cls ? ' class="' + cls + '"' : '');
-      const align = fmt !== 'str' ? ' style="text-align:right"' : '';
-      return '<td' + drillCls + align + '>' + esc(s) + '</td>';
-    }).join('');
-    const isBracketRow = d && d.isBracketTarget;
-    const isUpperBracket = d && d.fy === brackets.upperYear;
-    let html = '<tr class="' + (isBracketRow ? 'bracket ' : '') + (noChange ? 'no-change' : '') + '">' + cells + '</tr>';
-
-    // Excess sub-row for bracket target rows
-    if (d && d.isBracketTarget && (d.excessQtyBefore > 0 || d.excessQtyAfter > 0)) {
-      const piPerBond    = d.principalPerBond * (1 + d.coupon / 2 * d.nPeriods);
-      const exAmtBefore  = d.excessQtyBefore * piPerBond;
-      const exAmtAfter   = d.excessQtyAfter  * piPerBond;
-      const exCostBefore = d.excessQtyBefore * d.costPerBond;
-      const exCostAfter  = d.excessQtyAfter  * d.costPerBond;
-      const exQtyDelta   = d.excessQtyAfter - d.excessQtyBefore;
-      const exCashDelta  = -(exQtyDelta * d.costPerBond);
-      const exCells = SCOLS.map(({ label, fmt }) => {
-        let v, s2 = '', cls = '', subKey = '';
-        if      (label === 'CUSIP')         { s2 = esc(String(r[0])); }
-        else if (label === 'Maturity')      { s2 = esc(String(r[2])); }
-        else if (label === 'FY')            { s2 = 'Gap'; }
-        else if (label === 'Amount Before') { v = exAmtBefore;  s2 = fmtCell(v, 'amt'); subKey = 'gapAmtBefore'; }
-        else if (label === 'Amount After')  { v = exAmtAfter;   s2 = fmtCell(v, 'amt'); subKey = 'gapAmtAfter'; }
-        else if (label === 'Cost Before')   { v = exCostBefore; s2 = fmtCell(v, 'amt'); subKey = 'gapCostBefore'; }
-        else if (label === 'Cost After')    { v = exCostAfter;  s2 = fmtCell(v, 'amt'); subKey = 'gapCostAfter'; }
-        else if (label === 'Qty Before')    { v = d.excessQtyBefore; s2 = fmtCell(v, 'qty'); }
-        else if (label === 'Qty After')     { v = d.excessQtyAfter;  s2 = fmtCell(v, 'qty'); }
-        else if (label === 'Qty Δ')  { v = exQtyDelta;  s2 = fmtCell(v, 'sgn'); cls = fmtCls(v, 'sgn'); }
-        else if (label === 'Cash Δ') { v = exCashDelta; s2 = fmtCell(v, 'sgn'); cls = fmtCls(v, 'sgn'); }
-        const align = fmt !== 'str' ? ' style="text-align:right"' : '';
-        const drillAttr = subKey
-          ? ' class="drillable' + (cls ? ' ' + cls : '') + '" data-row="' + ri + '" data-col="' + subKey + '"'
-          : (cls ? ' class="' + cls + '"' : '');
-        return '<td' + drillAttr + align + '>' + s2 + '</td>';
-      }).join('');
-      const subRow = '<tr class="excess-subrow bracket">' + exCells + '</tr>';
-      html = isUpperBracket ? subRow + html : html + subRow;
-    }
-    return html;
-  }).join('');  // Total row
-  const totals = { amtBefore: 0, amtAfter: 0, costBefore: 0, costAfter: 0, cashDelta: 0 };
-  results.forEach((r, ri) => {
-    const d = details[ri];
-    totals.amtBefore  += typeof r[12] === 'number' ? r[12] : 0;
-    totals.amtAfter   += typeof r[14] === 'number' ? r[14] : 0;
-    totals.costBefore += d ? d.qtyBefore * d.costPerBond : 0;
-    totals.costAfter  += d ? d.qtyAfter  * d.costPerBond : 0;
-    totals.cashDelta  += (d && typeof d.cashDelta === 'number') ? d.cashDelta : (typeof r[11] === 'number' ? r[11] : 0);
-  });
-  const fmtSgn = v => { const r2 = Math.round(v); return (r2 > 0 ? '+' : '') + r2.toLocaleString('en-US'); };
-  const tfootCells = SCOLS.map(({ label, fmt, key }) => {
-    const align = fmt !== 'str' ? ' style="text-align:right"' : '';
-    let s = '';
-    if (label === 'Amount Before') s = Math.round(totals.amtBefore).toLocaleString('en-US');
-    else if (label === 'Amount After') s = Math.round(totals.amtAfter).toLocaleString('en-US');
-    else if (label === 'Cost Before') s = Math.round(totals.costBefore).toLocaleString('en-US');
-    else if (label === 'Cost After')  s = Math.round(totals.costAfter).toLocaleString('en-US');
-    else if (label === 'Cash Δ') s = fmtSgn(totals.cashDelta);
-    else if (label === 'CUSIP')        s = 'Total';
-    return '<td' + align + '>' + esc(s) + '</td>';
-  }).join('');
-  const simpleFoot = '<tfoot><tr>' + tfootCells + '</tr></tfoot>';
-    simpleEl.innerHTML = simpleHeader + '<tbody>' + simpleBody + '</tbody>' + simpleFoot;
-
-  rebalanceRendered = true;
+    rebalanceRendered = true;
   document.getElementById('output').style.display = 'block';
   updateStickyTop('simple-table', 'params-bar');
 }
 
 // ─── Render Build from Scratch output ────────────────────────────────────────
-function renderBFSOutput({ results, HDR, summary, details }) {
+function renderBuildOutput({ results, HDR, summary, details }) {
   const {
     settleDateDisp, refCPI, dara,
     firstYear, lastYear, gapYears,
     gapParams, lowerYear, upperYear,
-    lowerDur, upperDur, lowerWt, upperWt, lowerMonth, upperMonth,
+    lowerDuration, upperDuration, lowerWeight, upperWeight, lowerMonth, upperMonth,
     totalBuyCost, totalExcessCost,
   } = summary;
 
-  const ncBar = document.getElementById('bfs-net-cash-bar');
-  const ncVal = document.getElementById('bfs-net-cash-val');
+  const ncBar = document.getElementById('build-net-cash-bar');
+  const ncVal = document.getElementById('build-net-cash-val');
   ncVal.textContent = '$' + Math.round(totalBuyCost).toLocaleString();
   ncVal.className = 'nc-val';
   ncBar.style.display = 'flex';
@@ -573,8 +419,8 @@ function renderBFSOutput({ results, HDR, summary, details }) {
     `<div class="param"><span class="param-label">${label}</span><span class="param-val">${val}</span></div>`;
 
   const durFormula =
-    `${lowerWt.toFixed(2)} × ${lowerDur.toFixed(1)} (${lowerMonth} ${lowerYear} duration) + ` +
-    `${upperWt.toFixed(2)} × ${upperDur.toFixed(1)} (${upperMonth} ${upperYear} duration) = ` +
+    `${lowerWeight.toFixed(2)} × ${lowerDuration.toFixed(1)} (${lowerMonth} ${lowerYear} duration) + ` +
+    `${upperWeight.toFixed(2)} × ${upperDuration.toFixed(1)} (${upperMonth} ${upperYear} duration) = ` +
     `${gapParams.avgDuration.toFixed(1)}`;
 
   // Gap Cost + Excess Cost grouped with a blue tint box
@@ -587,7 +433,7 @@ function renderBFSOutput({ results, HDR, summary, details }) {
     gp('Excess Cost', fmtI(totalExcessCost), true) +
     `</div>`;
 
-  document.getElementById('bfs-params-bar').innerHTML =
+  document.getElementById('build-params-bar').innerHTML =
     param('Date',      esc(settleDateDisp)) +
     param('RefCPI',    refCPI) +
     param('DARA',      fmtI(dara)) +
@@ -597,87 +443,22 @@ function renderBFSOutput({ results, HDR, summary, details }) {
     param('Duration Match', durFormula) +
     costGroup;
 
-  // Build table — CUSIP | Maturity | FY | Amount | Cost | Qty
-  const BCOLS = [
-    { label: 'CUSIP',    fmt: 'str' },
-    { label: 'Maturity', fmt: 'str' },
-    { label: 'FY',       fmt: 'fy'  },
-    { label: 'Amount',   fmt: 'amt', drillIdx: 6 },
-    { label: 'Cost',     fmt: 'amt', drillIdx: 7 },
-    { label: 'Qty',      fmt: 'qty' },
-  ];
-  const tableEl = document.getElementById('bfs-table');
-  const bfsHeader = '<thead><tr>' + BCOLS.map(c => '<th>' + esc(c.label) + '</th>').join('') + '</tr></thead>';
-  function fmtB(v, fmt) {
-    if (fmt === 'str' || fmt === 'fy') return String(v ?? '');
-    if (fmt === 'qty') return typeof v === 'number' ? String(Math.round(v)) : String(v ?? '');
-    return typeof v === 'number' ? Math.round(v).toLocaleString('en-US') : String(v ?? '');
-  }
-  bfsDetails = details;
-  bfsSummary = summary;
-  const bfsBody = details.map((d, ri) => {
-    const isBT = d.ex_qty > 0;
-    const cells = BCOLS.map(({ label, fmt, drillIdx }) => {
-      let v, s;
-      if      (label === 'CUSIP')    { s = esc(d.cusip); }
-      else if (label === 'Maturity') { s = esc(d.maturityStr); }
-      else if (label === 'FY')       { s = String(d.fy); }
-      else if (label === 'Amount')   { v = d.fy_amt;  s = fmtB(v, 'amt'); }
-      else if (label === 'Cost')     { v = d.fy_cost; s = fmtB(v, 'amt'); }
-      else if (label === 'Qty')      { v = d.fy_qty;  s = fmtB(v, 'qty'); }
-      const align = fmt !== 'str' ? ' style="text-align:right"' : '';
-      const drillAttr = drillIdx !== undefined && v != null
-        ? ' class="drillable" data-row="' + ri + '" data-col="' + drillIdx + '"'
-        : '';
-      return '<td' + drillAttr + align + '>' + (s ?? '') + '</td>';
-    }).join('');
-    let html = '<tr class="' + (isBT ? 'bracket' : '') + '">' + cells + '</tr>';
-    const isBTUpper = d.fy === upperYear;
-    if (isBT) {
-      const exCells = BCOLS.map(({ label, fmt }) => {
-        let s = '', subDrill = '';
-        if      (label === 'CUSIP')    { s = esc(d.cusip); }
-        else if (label === 'Maturity') { s = esc(d.maturityStr); }
-        else if (label === 'FY')       { s = 'Gap'; }
-        else if (label === 'Amount')   { s = fmtB(d.ex_amt, 'amt');  subDrill = ' class="drillable" data-row="' + ri + '" data-col="8"'; }
-        else if (label === 'Cost')     { s = fmtB(d.ex_cost, 'amt'); subDrill = ' class="drillable" data-row="' + ri + '" data-col="9"'; }
-        else if (label === 'Qty')      { s = fmtB(d.ex_qty, 'qty'); }
-        const align = fmt !== 'str' ? ' style="text-align:right"' : '';
-        return '<td' + subDrill + align + '>' + s + '</td>';
-      }).join('');
-      const subRow = '<tr class="excess-subrow bracket">' + exCells + '</tr>';
-      html = isBTUpper ? subRow + html : html + subRow;
-    }
-    return html;
-  }).join('');
-  const bfsTotals = { amt: 0, cost: 0, qty: 0 };
-  details.forEach(d => {
-    bfsTotals.amt  += typeof d.fy_amt  === 'number' ? d.fy_amt  : 0;
-    bfsTotals.cost += (typeof d.fy_cost === 'number' ? d.fy_cost : 0) + (typeof d.ex_cost === 'number' ? d.ex_cost : 0);
-    bfsTotals.qty  += (typeof d.fy_qty  === 'number' ? d.fy_qty  : 0) + (typeof d.ex_qty  === 'number' ? d.ex_qty  : 0);
-  });
-  const bfsFmt = v => Math.round(v).toLocaleString('en-US');
-  const bfsTfoot = BCOLS.map(({ label, fmt }) => {
-    const align = fmt !== 'str' ? ' style="text-align:right"' : '';
-    let s = '';
-    if      (label === 'CUSIP')  s = 'Total';
-    else if (label === 'Amount') s = bfsFmt(bfsTotals.amt);
-    else if (label === 'Cost')   s = bfsFmt(bfsTotals.cost);
-    else if (label === 'Qty')    s = bfsFmt(bfsTotals.qty);
-    return '<td' + align + '>' + esc(s) + '</td>';
-  }).join('');
-  tableEl.innerHTML = bfsHeader + '<tbody>' + bfsBody + '</tbody>' + '<tfoot><tr>' + bfsTfoot + '</tr></tfoot>';
+  buildDetails = details;
+  buildSummary  = summary;
 
-  bfsRendered = true;
-  document.getElementById('bfs-output').style.display = 'block';
-  updateStickyTop('bfs-table', 'bfs-params-bar');
+  const { headerHTML: bHdr, bodyHTML: bBody, tfootHTML: bFoot } = renderTable({ details, mode: 'build', summary });
+  tableEl.innerHTML = bHdr + bBody + bFoot;
+
+    buildRendered = true;
+  document.getElementById('build-output').style.display = 'block';
+  updateStickyTop('build-table', 'build-params-bar');
 }
 
 // ─── Sticky header helper ─────────────────────────────────────────────────────────
 function updateStickyTop(tableId, paramsBarId) {
   const topRow    = document.getElementById('top-row');
   const paramsBar = document.getElementById(paramsBarId);
-  const scrollId  = tableId === 'simple-table' ? 'simple-scroll' : 'bfs-scroll';
+  const scrollId  = tableId === 'simple-table' ? 'simple-scroll' : 'build-scroll';
   const scrollWrap = document.getElementById(scrollId);
   if (!scrollWrap) return;
   const used = (topRow ? topRow.offsetHeight : 0) + (paramsBar ? paramsBar.offsetHeight : 0) + 48;
@@ -706,8 +487,8 @@ document.getElementById('run-btn').addEventListener('click', async () => {
       if (isNaN(lastYear)) { setStatus('Invalid Last Year selection.', true); return; }
 
       setStatus('Building ladder…');
-      const result = runBuildFromScratch({ dara, lastYear, tipsMap, refCPI, settlementDate });
-      renderBFSOutput(result);
+      const result = runBuild({ dara, lastYear, tipsMap, refCPI, settlementDate });
+      renderBuildOutput(result);
       setStatus('');
 
     } else {
@@ -764,121 +545,19 @@ document.getElementById('run-btn').addEventListener('click', async () => {
   }
 });
 
-// ─── Drill-down content builder ──────────────────────────────────────────────────────────────────────────────────────
-function buildDrillHTML(d, colIdx) {
-  const fm  = n => '$' + Math.round(n).toLocaleString('en-US');
-  const fd  = (n, dp) => Number(n).toFixed(dp);
-  const fm2 = n => '$' + n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-
-  const nPeriods    = d.halfOrFull === 0.5 ? 1 : 2;
-  const couponPct   = fd(d.coupon / 2 * 100, 5) + '%';
-  const couponLabel = nPeriods === 1 ? 'Last coupon (1 period)' : 'Last 2 coupons (2 periods)';
-  const principalPerBond = 1000 * d.indexRatio;
-
-  function row(label, formula, value, isTotal) {
-    const ts = isTotal ? 'font-weight:700;border-top:2px solid #1e293b;padding-top:6px;' : '';
-    const f  = formula
-      ? '<td style="padding:3px 14px;color:#64748b;font-size:11px;' + ts + '">' + formula + '</td>'
-      : '<td style="padding:3px 14px;' + ts + '"></td>';
-    return '<tr>'
-         + '<td style="padding:3px 16px 3px 0;white-space:nowrap;' + ts + '">' + label + '</td>'
-         + f
-         + '<td style="padding:3px 0 3px 14px;text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;' + ts + '">' + value + '</td>'
-         + '</tr>';
-  }
-  function sep() {
-    return '<tr><td colspan="3" style="padding:4px 0;border-bottom:1px dashed #e2e8f0"></td></tr>';
-  }
-
-  // Shared variable rows used by both FY Amount and Excess Amount
-  const DRILL_MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-  const matMonth = DRILL_MONTHS[parseInt(d.maturityStr.slice(0,2), 10) - 1];
-  function bondVarRows(qty) {
-    return row('refCPI', '', fd(d.refCPI, 5)) +
-      row('Dated date CPI', '', fd(d.baseCpi, 5)) +
-      row('Index ratio', fd(d.refCPI, 5) + ' / ' + fd(d.baseCpi, 5), fd(d.indexRatio, 5)) +
-      row('Principal per bond', '1,000 × index ratio', fm2(principalPerBond)) +
-      row('Coupon per period', 'annual coupon / 2', couponPct) +
-      row('Coupon periods in FY', '', nPeriods + (nPeriods === 1 ? ' (1 semi-annual)' : ' (Jan + ' + matMonth + ')'));
-  }
-
-  let rows = '';
-
-  if (colIdx === 6) {
-    rows =
-      bondVarRows() +
-      sep() +
-      row('Qty', '', d.fy_qty + ' bonds') +
-      row('Principal', 'principal/bond × qty', fm(d.fy_principalTotal)) +
-      row(couponLabel, 'principal/bond × coupon/period × periods × qty', fm(d.fy_ownRungInt)) +
-      row('Later maturity interest', 'from bonds maturing after ' + d.fy, fm(d.fy_laterMatInt)) +
-      sep() +
-      row('FY Amount', 'Principal + Coupons + Later mat int', fm(d.fy_amt), true) +
-      sep() +
-      row('DARA', '', fm(d.dara)) +
-      row('Surplus / Deficit', 'FY Amount − DARA', (d.fy_amt - d.dara >= 0 ? '+' : '') + Math.round(d.fy_amt - d.dara).toLocaleString('en-US'));
-
-  } else if (colIdx === 7) {
-    rows =
-      row('Price (unadjusted)', '', fd(d.price, 4)) +
-      row('refCPI', '', fd(d.refCPI, 5)) +
-      row('Dated date CPI', '', fd(d.baseCpi, 5)) +
-      row('Index ratio', fd(d.refCPI, 5) + ' / ' + fd(d.baseCpi, 5), fd(d.indexRatio, 5)) +
-      row('Cost per bond', 'price/100 × index ratio × 1,000', fm2(d.fy_costPerBond)) +
-      row('Qty', '', d.fy_qty + ' bonds') +
-      row('FY Cost', 'cost/bond × qty', fm(d.fy_cost), true);
-
-  } else if (colIdx === 8 || colIdx === 9) {
-    const s = bfsSummary;
-    const isAmt = colIdx === 8;
-    if (s) {
-      const isLower = d.fy === s.lowerYear;
-      const weight  = isLower ? s.lowerWt  : s.upperWt;
-      const wLabel  = isLower ? 'Lower weight' : 'Upper weight';
-      const wFml    = isLower
-        ? '(upper dur − avg dur) / (upper dur − lower dur)'
-        : '1 − lower weight';
-      const exCost  = s.gapParams.totalCost * weight;
-      rows = row('Gap year avg duration', '', fd(s.gapParams.avgDuration, 2) + ' yr')
-        + row('Lower bracket (' + s.lowerYear + ')', 'duration', fd(s.lowerDur, 2) + ' yr')
-        + row('Upper bracket (' + s.upperYear + ')', 'duration', fd(s.upperDur, 2) + ' yr')
-        + sep()
-        + row(wLabel, wFml, fd(weight, 4))
-        + sep()
-        + row('Gap year total cost', '', fm(s.gapParams.totalCost))
-        + row('Target excess cost', 'total cost × ' + wLabel.toLowerCase(), fm(exCost))
-        + sep()
-        + row('Cost per bond', 'price/100 × index ratio × 1,000', fm2(d.fy_costPerBond))
-        + row('Excess qty', 'round(target cost ÷ cost/bond)', d.ex_qty + ' bonds');
-      if (isAmt) {
-        rows += sep()
-          + bondVarRows()
-          + sep()
-          + row('P+I per bond', 'principal/bond × (1 + coupon/period × periods)', fm2(d.fy_pi))
-          + sep()
-          + row('Gap Amount', 'P+I/bond × excess qty', fm(d.ex_amt), true);
-      } else {
-        rows += sep()
-          + row('Gap Cost', 'cost/bond × excess qty', fm(d.ex_cost), true);
-      }
-    }
-  }
-  return '<table style="border-collapse:collapse;width:100%;font-size:12px">' + rows + '</table>';
-}
-
 // ─── Drill-down event wiring ────────────────────────────────────────────────────────────
-document.getElementById('bfs-table').addEventListener('click', e => {
+document.getElementById('build-table').addEventListener('click', e => {
   const td = e.target.closest('td.drillable');
-  if (!td || !bfsDetails) return;
-  const ri = parseInt(td.dataset.row, 10);
-  const ci = parseInt(td.dataset.col, 10);
-  const d  = bfsDetails[ri];
+  if (!td || !buildDetails) return;
+  const ri  = parseInt(td.dataset.row, 10);
+  const key = td.dataset.col;
+  const d   = buildDetails[ri];
   if (!d) return;
-  const colNames = { 6: 'Amount', 7: 'Cost', 8: 'Gap Amount', 9: 'Gap Cost' };
-  const suffix   = (ci === 8 || ci === 9) ? ' (bracket)' : '';
+  const colNames = { amount: 'Amount', cost: 'Cost', gapAmount: 'Gap Amount', gapCost: 'Gap Cost' };
+  const suffix   = (key === 'gapAmount' || key === 'gapCost') ? ' (bracket)' : '';
   document.getElementById('drill-title').textContent =
-    colNames[ci] + ' — FY ' + d.fy + suffix + ' · ' + d.cusip + ' · ' + d.maturityStr;
-  document.getElementById('drill-content').innerHTML = buildDrillHTML(d, ci);
+    colNames[key] + ' — Funded Year ' + d.fundedYear + suffix + ' · ' + d.cusip + ' · ' + d.maturityStr;
+  document.getElementById('drill-content').innerHTML = buildDrillHTML(d, key, buildSummary);
   const _ov = document.getElementById('drill-overlay');
   const _dm = document.getElementById('drill-modal');
   _dm.style.left = '50%'; _dm.style.top = '60px'; _dm.style.transform = 'translateX(-50%)';
@@ -921,199 +600,6 @@ let _drillDragging = false;
 }
 
 
-// ─── Rebalance drill-down ────────────────────────────────────────────────────────────────────────────────
-function buildRebalDrillHTML(d, colKey) {
-  const fm  = n => '$' + Math.round(n).toLocaleString('en-US');
-  const fm2 = n => '$' + n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  const fd  = (n, dp) => Number(n).toFixed(dp);
-  const RM  = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-  const matMonth  = RM[parseInt(d.maturityStr.slice(0,2), 10) - 1];
-  const couponPct = fd(d.coupon / 2 * 100, 5) + '%';
-  const nPerLbl   = d.nPeriods === 1 ? '1 semi-annual' : '2 (Jan + ' + matMonth + ')';
-
-  function row(label, formula, value, isTotal) {
-    const ts = isTotal ? 'font-weight:700;border-top:2px solid #1e293b;padding-top:6px;' : '';
-    const f  = formula
-      ? '<td style="padding:3px 14px;color:#64748b;font-size:11px;' + ts + '">' + formula + '</td>'
-      : '<td style="padding:3px 14px;' + ts + '"></td>';
-    return '<tr>'
-      + '<td style="padding:3px 16px 3px 0;white-space:nowrap;' + ts + '">' + label + '</td>'
-      + f
-      + '<td style="padding:3px 0 3px 14px;text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;' + ts + '">' + value + '</td>'
-      + '</tr>';
-  }
-  function sep() { return '<tr><td colspan="3" style="padding:4px 0;border-bottom:1px dashed #e2e8f0"></td></tr>'; }
-  function bondVarRows() {
-    return row('refCPI', '', fd(d.refCPI, 5))
-      + row('Dated date CPI', '', fd(d.baseCpi, 5))
-      + row('Index ratio', fd(d.refCPI, 5) + ' / ' + fd(d.baseCpi, 5), fd(d.indexRatio, 5))
-      + row('Principal per bond', '1,000 × index ratio', fd(d.principalPerBond, 2))
-      + row('Coupon per period', 'annual coupon / 2', couponPct)
-      + row('Coupon periods in FY', '', nPerLbl);
-  }
-
-  let rows = '';
-  if (colKey === 'araBefore' || colKey === 'araAfter') {
-    const isBef       = colKey === 'araBefore';
-    const principal   = isBef ? d.araBeforePrincipal   : d.araAfterPrincipal;
-    const ownCoupon   = isBef ? d.araBeforeOwnCoupon   : d.araAfterOwnCoupon;
-    const laterMatInt = isBef ? d.araBeforeLaterMatInt : d.araAfterLaterMatInt;
-    const araTotal    = isBef ? d.araBeforeTotal       : d.araAfterTotal;
-    const couponLabel = d.nPeriods === 1 ? 'Last coupon (1 period)' : 'Last 2 coupons (2 periods)';
-    const araQty = isBef ? d.qtyBefore : d.qtyAfter;
-    rows = bondVarRows() + sep()
-      + row('Qty', '', araQty + ' bonds')
-      + row('Principal', 'principal/bond × qty', fm(principal))
-      + row(couponLabel, 'principal/bond × coupon/period × periods × qty', fm(ownCoupon))
-      + row('Later maturity interest', 'from bonds maturing after FY', fm(laterMatInt))
-      + sep()
-      + row(isBef ? 'Amount Before' : 'Amount After', 'Principal + Coupons + Later mat int', fm(araTotal), true)
-      + sep()
-      + row('DARA', '', fm(d.DARA))
-      + row('Surplus / Deficit', (isBef ? 'Amount Before' : 'Amount After') + ' − DARA',
-            (araTotal - d.DARA >= 0 ? '+' : '') + Math.round(araTotal - d.DARA).toLocaleString('en-US'));
-
-  } else if (colKey === 'excessBefore' || colKey === 'excessAfter') {
-    const isBef = colKey === 'excessBefore';
-    const exQty = isBef ? d.excessQtyBefore  : d.excessQtyAfter;
-    const exCost= isBef ? d.excessQtyBefore * d.costPerBond : d.excessQtyAfter * d.costPerBond;
-    rows = bondVarRows() + sep()
-      + row('Cost per bond', 'price/100 × index ratio × 1,000', fm2(d.costPerBond))
-      + row('Excess qty', isBef ? 'current total − FY target (before)' : 'post-rebal total − FY target', exQty + ' bonds')
-      + sep()
-      + row(isBef ? 'Excess Cost Before' : 'Excess Cost After', 'cost/bond × excess qty', fm(exCost), true);
-
-  } else if (colKey === 'qtyAfter') {
-    const totalQty = d.qtyAfter;
-    rows = bondVarRows() + sep()
-      + row('Cost per bond', 'price/100 × index ratio × 1,000', fm2(d.costPerBond));
-    if (d.isBracketTarget) {
-      rows += sep()
-        + row('FY target qty', 'from rebalance algorithm', d.fyQty + ' bonds')
-        + row('Excess cost to deploy', '', fm(d.excessQtyAfter * d.costPerBond))
-        + row('Cost per bond', '', fm2(d.costPerBond))
-        + row('Excess bonds', 'round(excess cost ÷ cost per bond)', d.excessQtyAfter + ' bonds')
-        + sep()
-        + row('Total qty', 'FY target + excess bonds', totalQty + ' bonds', true);
-    } else if (d.qtyAfter !== d.qtyBefore) {
-      const piPB = d.principalPerBond * (1 + d.coupon / 2 * d.nPeriods);
-      const lmi  = d.araAfterLaterMatInt ?? 0;
-      const net  = d.DARA - lmi;
-      rows = row('refCPI', '', fd(d.refCPI, 5))
-        + row('Dated date CPI', '', fd(d.baseCpi, 5))
-        + row('Index ratio', fd(d.refCPI, 5) + ' / ' + fd(d.baseCpi, 5), fd(d.indexRatio, 5))
-        + row('Principal per bond', '1,000 × index ratio', fd(d.principalPerBond, 2))
-        + row('Coupon per period', 'annual coupon / 2', couponPct)
-        + row('Coupon periods in FY', '', nPerLbl)
-        + sep()
-        + row('P+I per bond', 'principal/bond × (1 + coupon/period × periods)', fm2(piPB))
-        + sep()
-        + row('DARA', '', fm(d.DARA))
-        + row('Later mat int', 'from bonds maturing after FY', fm(lmi))
-        + row('Net needed', 'DARA − Later mat int', fm(net))
-        + sep()
-        + row('Target FY qty', 'round(Net needed ÷ P+I per bond)', totalQty + ' bonds', true);
-    } else {
-      rows += sep()
-        + row('Qty', 'unchanged from current holdings', totalQty + ' bonds', true);
-    }
-  }
-
-  if (colKey === 'cashDelta') {
-    const qtyDelta  = d.qtyAfter - d.qtyBefore;
-    const cashDelta = -(qtyDelta * d.costPerBond);
-    const qdSign    = qtyDelta >= 0 ? '+' : '';
-    const cdSign    = cashDelta >= 0 ? '+' : '';
-    rows = ''
-      + row('Price (unadjusted)', '', fd(d.price, 4))
-      + row('refCPI', '', fd(d.refCPI, 5))
-      + row('Dated date CPI', '', fd(d.baseCpi, 5))
-      + row('Index ratio', fd(d.refCPI, 5) + ' / ' + fd(d.baseCpi, 5), fd(d.indexRatio, 5))
-      + sep()
-      + row('Cost per bond', 'price/100 × index ratio × 1,000', fm2(d.costPerBond))
-      + sep()
-      + row('Qty delta', 'Qty After − Qty Before', qdSign + qtyDelta + ' bonds')
-      + sep()
-      + row('Cash Δ', '−(Qty delta × cost/bond)', cdSign + fm(Math.abs(cashDelta)), true);
-  }
-
-
-  if (colKey === 'costBefore' || colKey === 'costAfter') {
-    const isBef = colKey === 'costBefore';
-    const isBT  = d.isBracketTarget;
-    const qty   = isBef ? (isBT ? d.fyQty : d.qtyBefore) : d.fyQty;
-    const qtyLabel = isBef ? (isBT ? 'FY qty (before)' : 'Qty Before') : 'Qty After';
-    const cost  = qty * d.costPerBond;
-    rows = ''
-      + row('Price (unadjusted)', '', fd(d.price, 4))
-      + row('refCPI', '', fd(d.refCPI, 5))
-      + row('Dated date CPI', '', fd(d.baseCpi, 5))
-      + row('Index ratio', fd(d.refCPI, 5) + ' / ' + fd(d.baseCpi, 5), fd(d.indexRatio, 5))
-      + sep()
-      + row('Cost per bond', 'price/100 × index ratio × 1,000', fm2(d.costPerBond))
-      + sep()
-      + row(qtyLabel, isBT ? 'FY-only (excluding gap excess)' : '', qty + ' bonds')
-      + sep()
-      + row(isBef ? 'Cost Before' : 'Cost After', 'qty × cost/bond', fm(cost), true);
-  }
-
-  if (colKey === 'gapAmtBefore' || colKey === 'gapAmtAfter' || colKey === 'gapCostBefore' || colKey === 'gapCostAfter') {
-    const s = rebalSummary;
-    const isAfter = colKey === 'gapAmtAfter' || colKey === 'gapCostAfter';
-    const isAmt   = colKey === 'gapAmtBefore' || colKey === 'gapAmtAfter';
-    const piPerBond = d.principalPerBond * (1 + d.coupon / 2 * d.nPeriods);
-    if (!isAfter) {
-      const exQty = d.excessQtyBefore;
-      rows = bondVarRows() + sep();
-      if (isAmt) {
-        rows += row('P+I per bond', 'principal/bond × (1 + coupon/period × periods)', fm2(piPerBond))
-          + sep()
-          + row('Excess qty', 'current total − FY target', exQty + ' bonds')
-          + sep()
-          + row('Excess Amount Before', 'P+I per bond × excess qty', fm(exQty * piPerBond), true);
-      } else {
-        rows += row('Cost per bond', 'price/100 × index ratio × 1,000', fm2(d.costPerBond))
-          + sep()
-          + row('Excess qty', 'current total − FY target', exQty + ' bonds')
-          + sep()
-          + row('Excess Cost Before', 'cost/bond × excess qty', fm(exQty * d.costPerBond), true);
-      }
-    } else if (s && s.brackets) {
-      const isLower = d.cusip === s.brackets.lowerCUSIP;
-      const weight  = isLower ? s.lowerWeight  : s.upperWeight;
-      const wLabel  = isLower ? 'Lower weight' : 'Upper weight';
-      const wFml    = isLower
-        ? '(upper dur − avg dur) / (upper dur − lower dur)'
-        : '1 − lower weight';
-      const exCost  = s.gapParams.totalCost * weight;
-      const exQty   = d.excessQtyAfter;
-      rows = row('Gap year avg duration', '', fd(s.gapParams.avgDuration, 2) + ' yr')
-        + row('Lower bracket (' + s.brackets.lowerCUSIP + ')', 'duration', fd(s.lowerDuration, 2) + ' yr')
-        + row('Upper bracket (' + s.brackets.upperCUSIP + ')', 'duration', fd(s.upperDuration, 2) + ' yr')
-        + sep()
-        + row(wLabel, wFml, fd(weight, 4))
-        + sep()
-        + row('Gap year total cost', '', fm(s.gapParams.totalCost))
-        + row('Target excess cost', 'total cost × ' + wLabel.toLowerCase(), fm(exCost))
-        + sep()
-        + row('Cost per bond', 'price/100 × index ratio × 1,000', fm2(d.costPerBond))
-        + row('Excess qty', 'round(target cost ÷ cost/bond)', exQty + ' bonds');
-      if (isAmt) {
-        rows += sep()
-          + bondVarRows() + sep()
-          + row('P+I per bond', 'principal/bond × (1 + coupon/period × periods)', fm2(piPerBond))
-          + sep()
-          + row('Excess Amount After', 'P+I/bond × excess qty', fm(exQty * piPerBond), true);
-      } else {
-        rows += sep()
-          + row('Excess Cost After', 'cost/bond × excess qty', fm(exQty * d.costPerBond), true);
-      }
-    }
-  }
-
-  return '<table style="border-collapse:collapse;width:100%;font-size:12px">' + rows + '</table>';
-}
-
 document.getElementById('simple-table').addEventListener('click', e => {
   const td = e.target.closest('td.drillable');
   if (!td || !rebalDetails) return;
@@ -1121,15 +607,15 @@ document.getElementById('simple-table').addEventListener('click', e => {
   const key = td.dataset.col;
   const d   = rebalDetails[ri];
   if (!d) return;
-  const colNames = { araBefore: 'Amount Before', araAfter: 'Amount After',
+  const colNames = { amtBefore: 'Amount Before', amtAfter: 'Amount After',
     excessBefore: 'Excess Before', excessAfter: 'Excess After',
     qtyBefore: 'Qty Before', qtyAfter: 'Qty After', cashDelta: 'Cash Δ',
     costBefore: 'Cost Before', costAfter: 'Cost After',
     gapAmtBefore: 'Gap Amount Before', gapAmtAfter: 'Gap Amount After',
     gapCostBefore: 'Gap Cost Before', gapCostAfter: 'Gap Cost After' };
   document.getElementById('drill-title').textContent =
-    colNames[key] + ' — FY ' + d.fy + ' · ' + d.cusip + ' · ' + d.maturityStr;
-  document.getElementById('drill-content').innerHTML = buildRebalDrillHTML(d, key);
+    colNames[key] + ' — FY ' + d.fundedYear + ' · ' + d.cusip + ' · ' + d.maturityStr;
+  document.getElementById('drill-content').innerHTML = buildDrillHTML(d, key, rebalSummary);
   const _ov = document.getElementById('drill-overlay');
   const _dm = document.getElementById('drill-modal');
   _dm.style.left = '50%'; _dm.style.top = '60px'; _dm.style.transform = 'translateX(-50%)';

@@ -1,0 +1,7 @@
+{
+  "name": "tips-ladder-builder",
+  "type": "module",
+  "scripts": {
+    "test": "node tests/run.js"
+  }
+}
