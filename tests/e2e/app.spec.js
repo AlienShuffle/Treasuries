@@ -119,6 +119,25 @@ test('build: first-to-mature preference runs successfully', async ({ page }) => 
   expect(await page.locator('#build-table tbody tr').count()).toBeGreaterThan(0);
 });
 
+test('build: pre-ladder interest checkbox visible in Build, hidden in Rebalance', async ({ page }) => {
+  await expect(page.locator('#field-pre-ladder')).not.toBeVisible();
+  await page.locator('.mode-btn[data-mode="build"]').click();
+  await expect(page.locator('#field-pre-ladder')).toBeVisible();
+  await page.locator('.mode-btn[data-mode="rebalance"]').click();
+  await expect(page.locator('#field-pre-ladder')).not.toBeVisible();
+});
+
+test('build: pre-ladder interest checked runs successfully', async ({ page }) => {
+  await page.locator('.mode-btn[data-mode="build"]').click();
+  const lastYearSel = page.locator('#last-year');
+  const optionCount = await lastYearSel.locator('option').count();
+  await lastYearSel.selectOption({ index: optionCount - 1 });
+  await page.locator('#pre-ladder-interest').check();
+  await page.locator('#run-btn').click();
+  await expect(page.locator('#build-output')).toHaveCSS('display', 'block', { timeout: 15_000 });
+  expect(await page.locator('#build-table tbody tr').count()).toBeGreaterThan(0);
+});
+
 // ── 5. Help modal ─────────────────────────────────────────────────────────────
 test('help modal: opens on ? button, closes on × button', async ({ page }) => {
   const overlay = page.locator('#help-overlay');

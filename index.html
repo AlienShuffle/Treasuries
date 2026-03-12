@@ -202,6 +202,13 @@
           <option value="first">First to mature</option>
         </select>
       </div>
+      <div class="field" id="field-pre-ladder" style="display:none">
+        <label style="white-space:nowrap" title="Include coupon income received before the ladder starts, reducing early rung quantities">Pre-ladder int.</label>
+        <label style="display:flex;align-items:center;gap:4px;cursor:pointer">
+          <input type="checkbox" id="pre-ladder-interest" style="width:auto;margin:0">
+          <span style="font-size:11px;color:#475569">Include</span>
+        </label>
+      </div>
       <div class="field" style="justify-content:flex-end">
         <button id="run-btn" disabled>Run Rebalance</button>
       </div>
@@ -378,6 +385,7 @@ document.querySelectorAll('.mode-btn').forEach(btn => {
     document.getElementById('field-last-year').style.display  = isRebalance ? 'none' : '';
     document.getElementById('field-first-year').style.display = isRebalance ? 'none' : '';
     document.getElementById('field-build-maturity').style.display = isRebalance ? 'none' : '';
+    document.getElementById('field-pre-ladder').style.display = isRebalance ? 'none' : '';
     if (!isRebalance) document.getElementById('dara').closest('.field').style.display = '';
     document.getElementById('run-btn').textContent = isRebalance ? 'Run Rebalance' : 'Build Ladder';
 
@@ -449,6 +457,7 @@ function renderBuildOutput({ results, HDR, summary, details }) {
     gapParams, lowerYear, upperYear,
     lowerDuration, upperDuration, lowerWeight, upperWeight, lowerMonth, upperMonth,
     totalBuyCost, totalExcessCost,
+    preLadderYears, preLadderPool, zeroedFundedYears,
   } = summary;
 
   document.getElementById('net-cash-val').textContent = '$' + Math.round(totalBuyCost).toLocaleString();
@@ -456,8 +465,12 @@ function renderBuildOutput({ results, HDR, summary, details }) {
     document.getElementById('nc-label').textContent = 'Total Cost';
     document.getElementById('net-cash-inline').style.display = '';
     _infoPopups.duration = buildDurationPopupRows(summary, 'build');
+    const _plNote = (preLadderYears > 0 && zeroedFundedYears && zeroedFundedYears.length)
+      ? ' · <span style="color:#854d0e">Pre-ladder: ' + zeroedFundedYears.length + ' yr' + (zeroedFundedYears.length > 1 ? 's' : '') + ' zeroed (' + zeroedFundedYears.join(', ') + ')</span>'
+      : '';
     _buildRunInfo = ' · DARA <b>' + esc(Math.round(dara).toLocaleString()) + '</b>'
       + ' · FY ' + firstYear + '–' + lastYear
+      + _plNote
       + ' · <a class="info-link info-link-btn" data-popup="duration">Duration calcs</a>';
     document.getElementById('info-strip').innerHTML = '<div class="info-row">' + _staticInfo + '</div><div class="info-row">' + _buildRunInfo + '</div>';
     buildDetails = details;
@@ -509,7 +522,8 @@ document.getElementById('run-btn').addEventListener('click', async () => {
       const firstYearVal = document.getElementById('first-year').value;
       const firstYear = firstYearVal ? parseInt(firstYearVal, 10) : undefined;
       const maturityPref = document.getElementById('build-maturity').value;
-      const result = runBuild({ dara, firstYear, lastYear, tipsMap, refCPI, settlementDate, maturityPref });
+      const preLadderInterest = document.getElementById('pre-ladder-interest').checked;
+      const result = runBuild({ dara, firstYear, lastYear, tipsMap, refCPI, settlementDate, maturityPref, preLadderInterest });
       renderBuildOutput(result);
       setStatus('');
 

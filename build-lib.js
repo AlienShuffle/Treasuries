@@ -59,7 +59,7 @@ function calcGapParams(gapYears, tipsMap, settlementDate, refCPI, dara, prelim) 
 // Returns: { results, HDR, summary }
 // Spec: knowledge/3.0_TIPS_Ladders.md and knowledge/4.0_TIPS_Ladder_Rebalancing.md §Full Rebalance
 // Variable naming note: fundedYearQty, excessQty, costPerBond (harmonized) — see §Code Variable Mapping
-export function runBuild({ dara, firstYear: firstYearOpt, lastYear, tipsMap, refCPI, settlementDate, maturityPref = 'last' }) {
+export function runBuild({ dara, firstYear: firstYearOpt, lastYear, tipsMap, refCPI, settlementDate, maturityPref = 'last', preLadderInterest = false }) {
   const firstYear      = firstYearOpt ?? settlementDate.getFullYear();
   const settleDateDisp = fmtDate(settlementDate);
 
@@ -111,6 +111,33 @@ export function runBuild({ dara, firstYear: firstYearOpt, lastYear, tipsMap, ref
     laterMatInt += ann;
   }
 
+  // 3b. Pre-ladder interest pool (Build only, spec: 5.0 §Pre-Ladder Interest Option)
+  //     Coupons received from all ladder bonds before the ladder starts (years < firstYear).
+  //     Applied short→long to zero out the earliest funded years first.
+  const preLadderYears = preLadderInterest ? Math.max(0, firstYear - settlementDate.getFullYear()) : 0;
+  let preLadderPool = 0;
+  const zeroedFundedYears = new Set();
+  let partialCreditYear = null, partialCredit = 0;
+
+  if (preLadderYears > 0) {
+    const totalAnnualInt = Object.values(prelim).reduce((s, p) => s + p.annualInterest, 0);
+    preLadderPool = preLadderYears * totalAnnualInt;
+
+    let remaining = preLadderPool;
+    for (const year of [...rangeYears].sort((a, b) => a - b)) {  // short → long
+      const need = dara - prelim[year].laterMatInt;
+      if (need <= 0) { zeroedFundedYears.add(year); continue; }  // already covered by laterMatInt
+      if (remaining >= need) {
+        zeroedFundedYears.add(year);
+        remaining -= need;
+      } else {
+        partialCreditYear = year;
+        partialCredit = remaining;
+        break;
+      }
+    }
+  }
+
   // 4. Gap parameters → duration matching → bracket weights
   const gapParams = calcGapParams(gapYears, tipsMap, settlementDate, refCPI, dara, prelim);
 
@@ -133,8 +160,14 @@ export function runBuild({ dara, firstYear: firstYearOpt, lastYear, tipsMap, ref
   const details = [];
   let totalBuyCost = 0;
   for (const year of rangeYears) {
-    const bond      = yearBondMap[year];
-    const fundedYearQty = prelim[year].targetFundedYearQty;
+    const bond = yearBondMap[year];
+    const isZeroed = zeroedFundedYears.has(year);
+    const prelim_pi = prelim[year].pi;
+    const prelim_lmi = prelim[year].laterMatInt;
+    const fundedYearQty = isZeroed ? 0
+      : year === partialCreditYear
+        ? Math.max(0, Math.round((dara - prelim_lmi - partialCredit) / prelim_pi))
+        : prelim[year].targetFundedYearQty;
     const excessQty  = year === lowerYear ? lowerExQty : year === upperYear ? upperExQty : 0;
     const totQty     = fundedYearQty + excessQty;
     const { indexRatio: ir, costPerBond: cpb } = bondCalcs(bond, refCPI);
@@ -196,6 +229,8 @@ export function runBuild({ dara, firstYear: firstYearOpt, lastYear, tipsMap, ref
     lowerDuration, upperDuration, lowerWeight, upperWeight, lowerMonth, upperMonth,
     lowerExQty, upperExQty, totalExcessCost,
     totalBuyCost,
+    preLadderInterest, preLadderYears, preLadderPool,
+    zeroedFundedYears: [...zeroedFundedYears].sort((a, b) => a - b),
   };
 
   return { results, HDR, summary, details };
