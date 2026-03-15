@@ -179,6 +179,8 @@
     <div class="mode-toggle">
       <button class="mode-btn active" data-mode="rebalance">Rebalance</button>
       <button class="mode-btn" data-mode="build">Build</button>
+      <button id="run-btn" disabled style="margin-left:8px;">Run Rebalance</button>
+      <button id="export-csv-btn" style="display:none;background:#1e293b;" title="Export table to CSV">Export CSV</button>
     </div>
     <div class="fields">
       <div class="field" id="field-holdings">
@@ -224,10 +226,6 @@
           <input type="checkbox" id="pre-ladder-interest" style="width:auto;margin:0">
           <span style="font-size:11px;color:#475569">Include</span>
         </label>
-      </div>
-      <div class="field" style="justify-content:flex-end;flex-direction:row;gap:8px;">
-        <button id="run-btn" disabled>Run Rebalance</button>
-        <button id="export-csv-btn" style="display:none;background:#1e293b;" title="Export table to CSV">Export CSV</button>
       </div>
       <div id="net-cash-inline">
         <span class="nc-label" id="nc-label">Net Cash</span>
