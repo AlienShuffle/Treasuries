@@ -26,8 +26,7 @@ npx serve .
 | Module | Role |
 |--------|------|
 | `src/bond-math.js` | Pure per-bond math: `bondCalcs()`, `calculateMDuration()`, `rungAmount()` |
-| `src/gap-math.js` | Gap/bracket math: `calcGapParams()`, `bracketWeights()`, `bracketExcessQtys()`, yield interpolation |
-| `src/ladder-math.js` | Sweep helpers: `fyQty()`, `laterMatIntContribution()` |
+| `src/gap-math.js` | Gap/bracket math + sweep helpers: `calcGapParams()`, `bracketWeights()`, `bracketExcessQtys()`, `fyQty()`, `laterMatIntContribution()`, yield interpolation |
 | `src/rebalance-lib.js` | Rebalance orchestrator — calls the above, no raw formulas |
 | `src/build-lib.js` | Build-from-scratch orchestrator — same constraint |
 | `src/render.js` | Table HTML from unified `COLS` schema (183L) |
@@ -42,7 +41,7 @@ npx serve .
 | Doc | Governs |
 |-----|---------|
 | `knowledge/4.0_TIPS_Ladder_Rebalancing.md` | Core rebalance algorithm, all named quantities, formulas, variable mapping |
-| `knowledge/5.0_Computation_Modules.md` | Module APIs (bond-math, gap-math, ladder-math) |
+| `knowledge/5.0_Computation_Modules.md` | Module APIs (bond-math, gap-math) |
 | `knowledge/6.0_UI_Schema.md` | COLS schema, table structure, drill popup routing |
 | `knowledge/2.1_TIPS_Basics.md` | costPerBond, piPerBond, indexRatio, adjustedPrincipal |
 
