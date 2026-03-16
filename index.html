@@ -122,7 +122,8 @@
     <p><b>RefCPI</b> — Reference CPI value used for all inflation adjustments.</p>
 
     <h3 style="font-size:13px;margin:16px 0 6px;border-bottom:1px solid #eee;padding-bottom:4px;">Mode: Rebalance</h3>
-    <p>For existing TIPS ladder holders. Sells excess bracket bonds and buys into newly available maturities (former gap years).</p>
+    <p>For existing TIPS ladder holders. Sells excess bracket bonds and buys into newly available maturities (former gap years). Support for extending the ladder beyond 2040 is included.</p>
+    <p><b>Last Year</b> — Automatically detected from holdings. If your last maturity is 2040, it defaults to 2040 (or the last gap year, 2039). If your holdings end before 2040, that year is used. You can override this to extend the ladder to 2041+; the tool will identify the appropriate TIPS for those years automatically.</p>
     <p><b>Brackets</b> — <i>2-bracket</i>: standard lower + upper split (lower bracket = TIPS with most holdings before the gap). <i>3-bracket</i>: original lower bracket excess is frozen; a new lower bracket (latest Jan 10-year TIPS before the gap) is bought to supplement, allowing a more duration-efficient split. Use when the new lower TIPS now exists and you want to minimize disturbance to your existing lower holdings.</p>
     <p><b>Holdings CSV</b> — Two columns: <code>cusip</code> and <code>qty</code>. A sample is pre-filled when you click the file input.</p>
     <pre style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:4px;padding:8px;font-size:12px;margin:6px 0;">cusip,qty
@@ -588,6 +589,7 @@ function updateRebalLastYearDropdown() {
   }
 
   const _tipsYears = new Set([...tipsMap.values()].filter(b => b.maturity).map(b => b.maturity.getFullYear()));
+  const _maxTipsY  = Math.max(..._tipsYears);
   const _hYearSet  = new Set(_hYears);
   const _gapYears  = [];
   for (let y = _firstY; y <= _derivedLY; y++) {
@@ -601,9 +603,9 @@ function updateRebalLastYearDropdown() {
 
   // Preserve current selection if valid, else use inferred default
   const _curVal = sel.value ? parseInt(sel.value, 10) : NaN;
-  const _selVal = (!isNaN(_curVal) && _curVal >= _firstY && _curVal <= _derivedLY) ? _curVal : _defaultLY;
+  const _selVal = (!isNaN(_curVal) && _curVal >= _firstY && _curVal <= _maxTipsY) ? _curVal : _defaultLY;
 
-  for (let y = _firstY; y <= _derivedLY; y++) {
+  for (let y = _firstY; y <= _maxTipsY; y++) {
     const opt = document.createElement('option');
     opt.value = y;
     opt.textContent = _gapSet.has(y) ? `${y} (gap)` : String(y);

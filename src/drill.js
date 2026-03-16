@@ -273,6 +273,9 @@ export function buildDrillHTML(d, colKey, summary) {
 }
 
 export function buildDurationPopupRows(summary, mode) {
+  if (mode === 'rebal' && (!summary.gapYears || summary.gapYears.length === 0)) {
+    return [{ label: 'No gap years', note: 'Bracket duration matching not applicable for this ladder', total: true }];
+  }
   const lowerYear  = mode === 'rebal' ? summary.brackets.lowerYear  : summary.lowerYear;
   const upperYear  = mode === 'rebal' ? summary.brackets.upperYear  : summary.upperYear;
   const lowerLabel = mode === 'build'
