@@ -22,10 +22,17 @@ function sep() { return '<tr><td colspan="3" style="padding:4px 0;border-bottom:
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
 function bondVarRows(d, nPeriods, principalPerBond, couponPct) {
-  const matMonth = MONTHS[parseInt(d.maturityStr.slice(0,2), 10) - 1];
-  const nPerLbl  = nPeriods === 1 ? '1 semi-annual' : '2 (Jan + ' + matMonth + ')';
+  const matDate = new Date(d.maturityStr);
+  const matMonthName = MONTHS[matDate.getMonth()];
+  let nPerLbl;
+  if (nPeriods === 1) {
+    nPerLbl = '1 semi-annual (' + matMonthName + ')';
+  } else {
+    const firstMonthName = MONTHS[(matDate.getMonth() - 6 + 12) % 12];
+    nPerLbl = '2 (' + firstMonthName + ' + ' + matMonthName + ')';
+  }
   return row('refCPI', '', fd(d.refCPI, 5))
-    + row('Dated date CPI', '', fd(d.baseCpi, 5))
+    + row('Dated date RefCPI', '', fd(d.baseCpi, 5))
     + row('Index ratio', fd(d.refCPI, 5) + ' / ' + fd(d.baseCpi, 5), fd(d.indexRatio, 5))
     + row('Principal per bond', '1,000 \xd7 index ratio', fd(principalPerBond, 2))
     + row('Coupon per period', 'annual coupon / 2', couponPct)
@@ -65,7 +72,7 @@ export function buildDrillHTML(d, colKey, summary) {
     rows =
       row('Price (unadjusted)', '', fd(d.price, 4)) +
       row('refCPI', '', fd(d.refCPI, 5)) +
-      row('Dated date CPI', '', fd(d.baseCpi, 5)) +
+      row('RefCPI', '', fd(d.baseCpi, 5)) +
       row('Index ratio', fd(d.refCPI, 5) + ' / ' + fd(d.baseCpi, 5), fd(d.indexRatio, 5)) +
       row('Cost per bond', 'price/100 \xd7 index ratio \xd7 1,000', fm2(d.costPerBond)) +
       row('Qty', '', d.fundedYearQty + ' bonds') +
@@ -141,11 +148,11 @@ export function buildDrillHTML(d, colKey, summary) {
       const lmi  = d.araAfterLaterMatInt ?? 0;
       const net  = _DARA - lmi;
       rows = row('refCPI', '', fd(d.refCPI, 5))
-        + row('Dated date CPI', '', fd(d.baseCpi, 5))
+        + row('Dated date RefCPI', '', fd(d.baseCpi, 5))
         + row('Index ratio', fd(d.refCPI, 5) + ' / ' + fd(d.baseCpi, 5), fd(d.indexRatio, 5))
         + row('Principal per bond', '1,000 \xd7 index ratio', fd(principalPerBond, 2))
         + row('Coupon per period', 'annual coupon / 2', couponPct)
-        + row('Coupon periods in FY', '', nPeriods === 1 ? '1 semi-annual' : '2 (Jan + ' + MONTHS[parseInt(d.maturityStr.slice(0,2), 10) - 1] + ')')
+        + row('Coupon periods in FY', '', nPeriods === 1 ? '1 semi-annual (' + MONTHS[new Date(d.maturityStr).getMonth()] + ')' : '2 (' + MONTHS[(new Date(d.maturityStr).getMonth() - 6 + 12) % 12] + ' + ' + MONTHS[new Date(d.maturityStr).getMonth()] + ')')
         + sep()
         + row('P+I per bond', 'principal/bond \xd7 (1 + coupon/period \xd7 periods)', fm2(piPB))
         + sep()
@@ -168,7 +175,7 @@ export function buildDrillHTML(d, colKey, summary) {
     rows =
       row('Price (unadjusted)', '', fd(d.price, 4)) +
       row('refCPI', '', fd(d.refCPI, 5)) +
-      row('Dated date CPI', '', fd(d.baseCpi, 5)) +
+      row('RefCPI', '', fd(d.baseCpi, 5)) +
       row('Index ratio', fd(d.refCPI, 5) + ' / ' + fd(d.baseCpi, 5), fd(d.indexRatio, 5)) +
       sep() +
       row('Cost per bond', 'price/100 \xd7 index ratio \xd7 1,000', fm2(d.costPerBond)) +
@@ -187,7 +194,7 @@ export function buildDrillHTML(d, colKey, summary) {
     rows =
       row('Price (unadjusted)', '', fd(d.price, 4)) +
       row('refCPI', '', fd(d.refCPI, 5)) +
-      row('Dated date CPI', '', fd(d.baseCpi, 5)) +
+      row('RefCPI', '', fd(d.baseCpi, 5)) +
       row('Index ratio', fd(d.refCPI, 5) + ' / ' + fd(d.baseCpi, 5), fd(d.indexRatio, 5)) +
       sep() +
       row('Cost per bond', 'price/100 \xd7 index ratio \xd7 1,000', fm2(d.costPerBond)) +
@@ -256,7 +263,7 @@ export function buildDrillHTML(d, colKey, summary) {
     rows =
       row('Price (unadjusted)', '', fd(d.price, 4)) +
       row('refCPI', '', fd(d.refCPI, 5)) +
-      row('Dated date CPI', '', fd(d.baseCpi, 5)) +
+      row('RefCPI', '', fd(d.baseCpi, 5)) +
       row('Index ratio', fd(d.refCPI, 5) + ' / ' + fd(d.baseCpi, 5), fd(d.indexRatio, 5)) +
       sep() +
       row('Cost per bond', 'price/100 × index ratio × 1,000', fm2(d.costPerBond)) +

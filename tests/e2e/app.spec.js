@@ -19,6 +19,8 @@ test.beforeEach(async ({ page }) => {
     r.fulfill({ body: csv('TipsYields.csv'), contentType: 'text/csv' }));
   await page.route('**/TIPS/RefCPI.csv', r =>
     r.fulfill({ body: csv('RefCPI.csv'), contentType: 'text/csv' }));
+  await page.route('**/TIPS/TipsRef.csv', r =>
+    r.fulfill({ body: csv('TipsRef.csv'), contentType: 'text/csv' }));
   // Allow sample pre-populate to succeed (uses local data/CusipQtyTest.csv via serve)
   await page.goto('/');
   // Wait for data load: run button must be enabled
@@ -459,4 +461,129 @@ test('rebalance: no negative Qty After values at low DARA', async ({ page }) => 
     const val = parseFloat((cellText ?? '').replace(/[^0-9.-]/g, ''));
     if (!isNaN(val)) expect(val, `Row ${i} Qty After = ${val} is negative`).toBeGreaterThanOrEqual(0);
   }
+});
+
+// Helper: parse net cash from #net-cash-val text (strips $, commas, sign handling)
+function parseNetCash(text) {
+  if (!text) return NaN;
+  const t = text.replace(/[$,]/g, '').trim();
+  return parseFloat(t);
+}
+
+// ── 16. Net cash non-negative and near zero after Full rebalance ───────────────
+test('rebalance: Full method net cash is non-negative and within $2,000', async ({ page }) => {
+  await page.locator('#holdings-file').setInputFiles(HOLDINGS_PATH);
+  await page.locator('#dara').fill('');
+  await expect(page.locator('#method')).toHaveValue('Full');
+
+  await page.locator('#run-btn').click();
+  await expect(page.locator('#simple-table tbody tr').first()).toBeVisible({ timeout: 15_000 });
+
+  const raw = await page.locator('#net-cash-val').textContent();
+  const netCash = parseNetCash(raw);
+  expect(netCash, 'Net cash must be a number').not.toBeNaN();
+  expect(netCash, `Net cash ${netCash} is negative`).toBeGreaterThanOrEqual(0);
+  expect(netCash, `Net cash ${netCash} exceeds $2,000 tolerance`).toBeLessThanOrEqual(2000);
+});
+
+// ── 17. RefCPI date change clears output and preserves DARA ───────────────────
+test('rebalance: changing RefCPI date clears output and does not alter DARA', async ({ page }) => {
+  await page.locator('#holdings-file').setInputFiles(HOLDINGS_PATH);
+  await page.locator('#dara').fill('');
+  await page.locator('#run-btn').click();
+  await expect(page.locator('#simple-table tbody tr').first()).toBeVisible({ timeout: 15_000 });
+
+  // Record the inferred DARA
+  const daraAfterRun = await page.locator('#dara').inputValue();
+  expect(daraAfterRun).toMatch(/^\d+$/);
+
+  // Open RefCPI picker by clicking the refcpi-link
+  await page.locator('#refcpi-link').click();
+  await expect(page.locator('#refcpi-picker')).toBeVisible();
+
+  // Enter a past date and apply
+  await page.locator('#refcpi-date-input').fill('01/01/2024');
+  await page.locator('#refcpi-apply-btn').click();
+
+  // Output must be cleared
+  await expect(page.locator('#output')).toHaveCSS('display', 'none');
+  await expect(page.locator('#net-cash-inline')).toHaveCSS('display', 'none');
+
+  // DARA must be unchanged
+  const daraAfterRefCpi = await page.locator('#dara').inputValue();
+  expect(daraAfterRefCpi, 'DARA changed after RefCPI date change').toBe(daraAfterRun);
+});
+
+// ── 18. Full re-run with filled DARA does not re-infer (user value is preserved) ─
+test('rebalance: Full method does not overwrite DARA when field is already filled', async ({ page }) => {
+  await page.locator('#holdings-file').setInputFiles(HOLDINGS_PATH);
+  await page.locator('#dara').fill('');
+  await page.locator('#run-btn').click();
+  await expect(page.locator('#simple-table tbody tr').first()).toBeVisible({ timeout: 15_000 });
+
+  // Record the inferred DARA, then change RefCPI
+  const daraAfterFirstRun = await page.locator('#dara').inputValue();
+  expect(daraAfterFirstRun).toMatch(/^\d+$/);
+
+  await page.locator('#refcpi-link').click();
+  await page.locator('#refcpi-date-input').fill('01/01/2024');
+  await page.locator('#refcpi-apply-btn').click();
+
+  // Re-run — DARA field is still filled, so Full must NOT re-infer
+  await page.locator('#run-btn').click();
+  await expect(page.locator('#simple-table tbody tr').first()).toBeVisible({ timeout: 15_000 });
+
+  const daraAfterReRun = await page.locator('#dara').inputValue();
+  expect(daraAfterReRun, 'Full rebalance overwrote user DARA with a new inferred value').toBe(daraAfterFirstRun);
+});
+
+// ── 19. Clearing DARA then re-running Full with new RefCPI gives non-negative net cash ─
+test('rebalance: Full method net cash is non-negative after clearing DARA and re-running with new RefCPI', async ({ page }) => {
+  await page.locator('#holdings-file').setInputFiles(HOLDINGS_PATH);
+  await page.locator('#dara').fill('');
+  await page.locator('#run-btn').click();
+  await expect(page.locator('#simple-table tbody tr').first()).toBeVisible({ timeout: 15_000 });
+
+  // Change RefCPI, clear DARA, re-run to get fresh inference with new RefCPI
+  await page.locator('#refcpi-link').click();
+  await page.locator('#refcpi-date-input').fill('01/01/2024');
+  await page.locator('#refcpi-apply-btn').click();
+  await page.locator('#dara').fill('');
+
+  await page.locator('#run-btn').click();
+  await expect(page.locator('#simple-table tbody tr').first()).toBeVisible({ timeout: 15_000 });
+
+  // DARA must have been re-inferred (field shows a number, not blank)
+  const daraAfterReInfer = await page.locator('#dara').inputValue();
+  expect(daraAfterReInfer, 'DARA was not re-inferred after clearing').toMatch(/^\d+$/);
+
+  // Net cash must be near zero — allow small binary-search noise (integer lot discretization
+  // can produce a cliff where |delta| < $200 is the best achievable)
+  const raw = await page.locator('#net-cash-val').textContent();
+  const netCash = parseNetCash(raw);
+  expect(netCash, 'Net cash must be a number after RefCPI change + DARA clear').not.toBeNaN();
+  expect(Math.abs(netCash), `Net cash ${netCash} exceeds $200 tolerance after fresh inference`).toBeLessThanOrEqual(200);
+});
+
+// ── 20. Enter on refcpi-date-input must not auto-trigger Run ──────────────────
+test('rebalance: pressing Enter in RefCPI date picker applies date but does not auto-run', async ({ page }) => {
+  await page.locator('#holdings-file').setInputFiles(HOLDINGS_PATH);
+  await page.locator('#run-btn').click();
+  await expect(page.locator('#simple-table tbody tr').first()).toBeVisible({ timeout: 15_000 });
+
+  const daraBefore = await page.locator('#dara').inputValue();
+
+  // Open picker, type date, press Enter
+  await page.locator('#refcpi-link').click();
+  await expect(page.locator('#refcpi-picker')).toBeVisible();
+  await page.locator('#refcpi-date-input').fill('01/01/2024');
+  await page.locator('#refcpi-date-input').press('Enter');
+
+  // Picker must be closed and output cleared
+  await expect(page.locator('#refcpi-picker')).toHaveCSS('display', 'none');
+  await expect(page.locator('#output')).toHaveCSS('display', 'none');
+
+  // DARA must be unchanged (Enter must not have triggered a run)
+  const daraAfter = await page.locator('#dara').inputValue();
+  expect(daraAfter, 'DARA changed after Enter in RefCPI picker — run was auto-triggered').toBe(daraBefore);
 });

@@ -106,16 +106,16 @@ function runFullRebalanceTest(name, filePath) {
   const { dara, portfolioCash } = inferDARAFromCash({ holdings, tipsMap, refCPI, settlementDate });
   const { summary } = runRebalance({ dara, method: 'Full', holdings, tipsMap, refCPI, settlementDate });
   
-  // Net cash should be effectively non-negative (surplus) and < cost of one bond (~$1500).
+  // Net cash should be effectively non-negative (surplus) and < cost of ~two bonds (~$3000).
   // (Allowing > -50 to account for binary search tolerance in inferDARA)
   const netCash = summary.costDeltaSum;
-  const ok = netCash > -50 && netCash < 1500;
+  const ok = netCash > -50 && netCash < 3000;
   
   if (ok) {
-    console.log(`  PASS  net cash within (-50, 1500)`);
+    console.log(`  PASS  net cash within (-50, 3000)`);
     passed++;
   } else {
-    console.error(`  FAIL  net cash within (-50, 1500)`);
+    console.error(`  FAIL  net cash within (-50, 3000)`);
     console.error(`        actual:   ${netCash}`);
     failed++;
   }

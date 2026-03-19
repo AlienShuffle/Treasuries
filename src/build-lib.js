@@ -111,8 +111,8 @@ export function runBuild({ dara, firstYear: firstYearOpt, lastYear, tipsMap, ref
     const bond = yearBondMap[year];
     const pi   = bondCalcs(bond, refCPI).piPerBond;
     const qty  = _fyQty(daraByYear?.get(year) ?? dara, laterMatInt, pi);
-    const ir   = refCPI / (bond.baseCpi ?? refCPI);
-    const ann  = qty * 1000 * ir * (bond.coupon ?? 0);
+    // Real interest = qty * 1000 * coupon (consistent with DARA)
+    const ann  = qty * 1000 * (bond.coupon ?? 0);
     prelim[year] = { targetFundedYearQty: qty, annualInterest: ann, laterMatInt, pi };
     laterMatInt += ann;
   }
@@ -181,7 +181,9 @@ export function runBuild({ dara, firstYear: firstYearOpt, lastYear, tipsMap, ref
     upperMonth = BL_MONTHS[upperBond.maturity.getMonth()];
     const lowerCPB = (lowerBond.price ?? 0) / 100 * (refCPI / (lowerBond.baseCpi ?? refCPI)) * 1000;
     const upperCPB = (upperBond.price ?? 0) / 100 * (refCPI / (upperBond.baseCpi ?? refCPI)) * 1000;
-    ({ lowerExQty, upperExQty } = bracketExcessQtys(gapParams.totalCost, lowerWeight, upperWeight, lowerCPB, upperCPB));
+    const lowerCPBReal = (lowerBond.price ?? 0) / 100 * 1000;
+    const upperCPBReal = (upperBond.price ?? 0) / 100 * 1000;
+    ({ lowerExQty, upperExQty } = bracketExcessQtys(gapParams.totalCost, lowerWeight, upperWeight, lowerCPBReal, upperCPBReal));
     totalExcessCost = lowerExQty * lowerCPB + upperExQty * upperCPB;
   }
 

@@ -303,13 +303,15 @@ document.getElementById('help-overlay').addEventListener('click', e => {
 });
 
 // ─── Load data CSVs ───────────────────────────────────────────────────────────
-let tipsMap = null, refCpiRows = null, settlementDate = null;
+let tipsMap = null, refCpiRows = null, settlementDate = null, tipsRefMap = null;
 
 async function loadData() {
   const dataInfo = document.getElementById('info-strip');
   try {
-    const { yieldsRows, refCpiRows: rows } = await fetchTipsData();
+    const { yieldsRows, refCpiRows: rows, tipsRefRows } = await fetchTipsData();
     refCpiRows = rows;
+    _maxRefCpiDate = rows.length ? rows[rows.length - 1].date : null;
+    tipsRefMap = new Map(tipsRefRows.map(r => [r.cusip, r]));
     const settleDateStr = yieldsRows[0]?.settlementDate;
     if (!settleDateStr) throw new Error('TipsYields.csv has no settlementDate');
     settlementDate = localDate(settleDateStr);
@@ -358,7 +360,7 @@ async function loadData() {
           ? ', none for ' + _gaps[0] + '–' + _gaps[_gaps.length - 1] + ' (gap years)'
           : '';
         _staticInfoPrefix = 'Prices as of ' + settleDateStr;
-        _staticInfoSuffix = ' · ' + yieldsRows.length + ' TIPS' + _gapSuffix;
+        _staticInfoSuffix = ' · <a class="info-link tips-ref-link">' + yieldsRows.length + ' TIPS</a>' + _gapSuffix;
         _staticInfo = _buildStaticInfo();
         dataInfo.innerHTML = '<div class="info-row">' + _staticInfo + '</div>';
     document.getElementById('run-btn').disabled = false;
@@ -415,6 +417,7 @@ let buildSummary = null;
 let _staticInfo = '', _rebalRunInfo = '', _buildRunInfo = '';
 let _staticInfoPrefix = '', _staticInfoSuffix = '';
 let activeRefCpiDateStr = null;
+let _maxRefCpiDate = null;
 let _daraRebal = '', _daraBuild = '40000';
 const _infoPopups = {};
 let _rebalDurationRows = null, _buildDurationRows = null;
@@ -490,13 +493,16 @@ function renderOutput({ results, HDR, summary, details }, portfolioCash = null) 
     const _bracketInfo = summary.bracketMode === '3bracket' && summary.newLowerCUSIP
       ? ' · New lower: ' + summary.newLowerCUSIP + ' (' + summary.newLowerYear + ')'
       : '';
+    const _ncColor = costDeltaSum >= 0 ? '#16a34a' : '#dc2626';
+    const _ncStrip = '<span style="margin-left:auto;padding-left:16px;font-weight:700;white-space:nowrap;color:' + _ncColor + '">Net Cash ' + sign(costDeltaSum) + '</span>';
     _rebalRunInfo = ' · DARA <b><span class="copy-dara" data-val="' + Math.round(DARA) + '" title="Click to copy">' + esc(Math.round(DARA).toLocaleString()) + '</span></b>'
       + (daraIsInferred ? ' <span style="color:#888;font-weight:400">(inferred)</span>' : '')
       + ' · FY ' + firstYear + '–' + lastYear + ', ' + rungCount + ' rungs'
       + _bracketInfo
       + ' <a class="info-link" data-popup="range">ⓘ</a>'
       + ' · <a class="info-link info-link-btn" data-popup="duration">Duration calcs</a>';
-    document.getElementById('info-strip').innerHTML = '<div class="info-row">' + _staticInfo + '</div><div class="info-row">' + _rebalRunInfo + '</div>';
+    document.getElementById('info-strip').innerHTML = '<div class="info-row">' + _staticInfo + '</div>'
+      + '<div class="info-row" style="display:flex;align-items:baseline"><span>' + _rebalRunInfo + '</span>' + _ncStrip + '</div>';
   
   rebalDetails = details;
   rebalSummary = summary;
@@ -534,11 +540,13 @@ function renderBuildOutput({ results, HDR, summary, details }) {
     const _plNote = (preLadderYears > 0 && zeroedFundedYears && zeroedFundedYears.length)
       ? ' · <span style="color:#854d0e">Pre-ladder: ' + zeroedFundedYears.length + ' yr' + (zeroedFundedYears.length > 1 ? 's' : '') + ' zeroed (' + zeroedFundedYears.join(', ') + ')</span>'
       : '';
+    const _bncStrip = '<span style="margin-left:auto;padding-left:16px;font-weight:700;white-space:nowrap">Total Cost $' + Math.round(totalBuyCost).toLocaleString() + '</span>';
     _buildRunInfo = ' · DARA <b>' + esc(Math.round(dara).toLocaleString()) + '</b>'
       + ' · FY ' + firstYear + '–' + lastYear
       + _plNote
       + (_hasGaps ? ' · <a class="info-link info-link-btn" data-popup="duration">Duration calcs</a>' : '');
-    document.getElementById('info-strip').innerHTML = '<div class="info-row">' + _staticInfo + '</div><div class="info-row">' + _buildRunInfo + '</div>';
+    document.getElementById('info-strip').innerHTML = '<div class="info-row">' + _staticInfo + '</div>'
+      + '<div class="info-row" style="display:flex;align-items:baseline"><span>' + _buildRunInfo + '</span>' + _bncStrip + '</div>';
     buildDetails = details;
   buildSummary  = summary;
 
@@ -856,17 +864,21 @@ document.getElementById('run-btn').addEventListener('click', async () => {
 
       let finalDara = dara;
       let portfolioCash = null;
+      let _daraWasInferred = false;
       if (method === 'Full' && dara === null) {
         setStatus('Inferring DARA from portfolio cash…');
         ({ dara: finalDara, portfolioCash } = inferDARAFromCash({ bracketMode, holdings, tipsMap, refCPI, settlementDate, lastYearOverride }));
-        document.getElementById('dara').value = String(Math.round(finalDara));
-        _daraByYearPanelDefault = Math.round(finalDara);
-        for (const [yr] of _daraByYearStore) _daraByYearStore.set(yr, Math.round(finalDara));
+        finalDara = Math.floor(finalDara);
+        document.getElementById('dara').value = String(finalDara);
+        _daraByYearPanelDefault = finalDara;
+        for (const [yr] of _daraByYearStore) _daraByYearStore.set(yr, finalDara);
         _daraAutoInferred = true;
+        _daraWasInferred = true;
       }
       _lastKnownDara = finalDara;
       setStatus('Running rebalance…');
-      const daraByYear = getDaraByYear();
+      // When DARA was just inferred (exact value), skip per-year panel to avoid rounding mismatch
+      const daraByYear = _daraWasInferred ? null : getDaraByYear();
       const result = runRebalance({ dara: finalDara, method, bracketMode, holdings, tipsMap, refCPI, settlementDate, daraByYear, lastYearOverride });
       document.getElementById('dara-by-year').style.display = 'none';
       updateDaraInput();
@@ -923,6 +935,7 @@ let currentHoldingsArray = null;
 document.getElementById('holdings-file').addEventListener('change', async (e) => {
   currentHoldingsArray = null;
   setStatus('');
+  _clearAutoDara();
   if (!e.target.files.length) return;
   
   try {
@@ -985,6 +998,7 @@ document.getElementById('holdings-file').addEventListener('change', async (e) =>
 // ─── Account selection modal events ───────────────────────────────────────────
   document.getElementById('account-confirm').addEventListener('click', () => {
     document.getElementById('account-overlay').style.display = 'none';
+    _clearAutoDara();
     const selected = Array.from(document.querySelectorAll('#account-list input:checked')).map(cb => cb.value);
     if (selected.length === 0) { setStatus('No accounts selected.', true); return; }
 
@@ -1060,6 +1074,8 @@ document.addEventListener('click', e => {
   // RefCPI picker trigger (also has class info-link — handle before generic info-link)
   const rl = e.target.closest('#refcpi-link');
   if (rl) { _showRefCpiPicker(rl); return; }
+  // TIPS ref popup
+  if (e.target.closest('.tips-ref-link')) { _showTipsRefPopup(); return; }
   const link = e.target.closest('.info-link');
   if (link) {
     const key  = link.dataset.popup;
@@ -1131,16 +1147,12 @@ document.getElementById('export-csv-btn').addEventListener('click', () => {
 
 document.getElementById('first-year').addEventListener('change', renderDaraByYearPanel);
 document.getElementById('rebal-last-year').addEventListener('change', () => {
-  if (_daraAutoInferred) {
-    document.getElementById('dara').value = '';
-    _daraAutoInferred = false;
-    _lastKnownDara = null;
-    _daraByYearPanelDefault = null;
-    _daraByYearStore.clear();
-  }
+  _clearAutoDara();
   renderDaraByYearPanel();
 });
 document.getElementById('last-year').addEventListener('change', renderDaraByYearPanel);
+document.getElementById('bracket-mode').addEventListener('change', _clearAutoDara);
+document.getElementById('method').addEventListener('change', _clearAutoDara);
 
 // ─── RefCPI date picker ───────────────────────────────────────────────────────
 function _fmtMDY(isoStr) {
@@ -1160,13 +1172,33 @@ function _buildStaticInfo() {
   if (!_date || !refCpiRows) return _staticInfoPrefix + _staticInfoSuffix;
   let _val;
   try { _val = lookupRefCpi(refCpiRows, _date); } catch(e) { return _staticInfoPrefix + _staticInfoSuffix; }
-  const _note = activeRefCpiDateStr
-    ? ' <span style="color:#888;font-size:11px">(as of ' + _fmtMDY(activeRefCpiDateStr) + ')</span>'
-    : '';
+  const _dateStyle = activeRefCpiDateStr ? ' style="color:#7c3aed"' : '';
   return _staticInfoPrefix
-    + ' · RefCPI <span id="refcpi-link" class="info-link" title="Click to change reference CPI date">'
-    + _val.toFixed(5) + '</span>' + _note
+    + ' · RefCPI ' + _val.toFixed(5)
+    + ' as of <span id="refcpi-link" class="info-link" title="Click to change reference CPI date"' + _dateStyle + '>'
+    + _fmtMDY(_date) + '</span>'
     + _staticInfoSuffix;
+}
+function _clearAutoDara() {
+  if (_daraAutoInferred) {
+    document.getElementById('dara').value = '';
+    _daraAutoInferred = false;
+    _lastKnownDara = null;
+    _daraByYearPanelDefault = null;
+    _daraByYearStore.clear();
+  }
+}
+
+function _clearOutput() {
+  rebalanceRendered = false; buildRendered = false;
+  rebalDetails = null; rebalSummary = null; buildDetails = null; buildSummary = null;
+  _rebalRunInfo = ''; _buildRunInfo = '';
+  document.getElementById('output').style.display = 'none';
+  document.getElementById('build-output').style.display = 'none';
+  document.getElementById('export-csv-btn').style.display = 'none';
+  document.getElementById('net-cash-inline').style.display = 'none';
+  document.getElementById('dara-by-year').style.display = 'none';
+  _clearAutoDara();
 }
 function _refreshInfoStrip() {
   _staticInfo = _buildStaticInfo();
@@ -1193,14 +1225,26 @@ function _showRefCpiPicker(anchorEl) {
 }
 document.getElementById('refcpi-date-input').addEventListener('input', () => {
   const inp = document.getElementById('refcpi-date-input');
-  const digits = inp.value.replace(/\D/g, '').slice(0, 8);
+  const raw = inp.value;
+  const digits = raw.replace(/\D/g, '').slice(0, 8);
   let fmt = digits;
   if (digits.length >= 3) fmt = digits.slice(0,2) + '/' + digits.slice(2);
   if (digits.length >= 5) fmt = digits.slice(0,2) + '/' + digits.slice(2,4) + '/' + digits.slice(4);
-  if (inp.value !== fmt) inp.value = fmt;
+  if (raw !== fmt) {
+    // Allow "/" typed at natural separator positions — don't strip a trailing slash
+    // the user just typed at the expected MM/ or MM/DD/ boundary
+    const isNaturalSlash = (raw === digits.slice(0,2) + '/') ||
+                           (raw === digits.slice(0,2) + '/' + digits.slice(2,4) + '/');
+    if (!isNaturalSlash) inp.value = fmt;
+  }
   const prev = document.getElementById('refcpi-date-preview');
   const dateStr = _parseMDY(fmt);
   if (!dateStr) { prev.textContent = ''; return; }
+  if (_maxRefCpiDate && dateStr > _maxRefCpiDate) {
+    prev.textContent = 'Date exceeds latest RefCPI data (' + _fmtMDY(_maxRefCpiDate) + ')';
+    prev.style.color = '#c0392b';
+    return;
+  }
   try {
     const val = lookupRefCpi(refCpiRows, dateStr);
     prev.textContent = 'RefCPI: ' + val.toFixed(5);
@@ -1211,18 +1255,14 @@ document.getElementById('refcpi-date-input').addEventListener('input', () => {
   }
 });
 document.getElementById('refcpi-date-input').addEventListener('keydown', e => {
-  if (e.key === 'Enter') document.getElementById('refcpi-apply-btn').click();
+  if (e.key === 'Enter') { e.stopPropagation(); document.getElementById('refcpi-apply-btn').click(); }
 });
 document.getElementById('refcpi-apply-btn').addEventListener('click', () => {
   const s    = document.getElementById('refcpi-date-input').value.trim();
   const prev = document.getElementById('refcpi-date-preview');
   if (!s) {
     activeRefCpiDateStr = null;
-    if (_daraAutoInferred) {
-      document.getElementById('dara').value = '';
-      _daraAutoInferred = false; _lastKnownDara = null;
-      _daraByYearPanelDefault = null; _daraByYearStore.clear();
-    }
+    _clearOutput();
     _refreshInfoStrip();
     document.getElementById('refcpi-picker').style.display = 'none';
     return;
@@ -1233,14 +1273,15 @@ document.getElementById('refcpi-apply-btn').addEventListener('click', () => {
     prev.style.color = '#c0392b';
     return;
   }
+  if (_maxRefCpiDate && dateStr > _maxRefCpiDate) {
+    prev.textContent = 'Date exceeds latest RefCPI data (' + _fmtMDY(_maxRefCpiDate) + ')';
+    prev.style.color = '#c0392b';
+    return;
+  }
   try {
     lookupRefCpi(refCpiRows, dateStr);
     activeRefCpiDateStr = dateStr;
-    if (_daraAutoInferred) {
-      document.getElementById('dara').value = '';
-      _daraAutoInferred = false; _lastKnownDara = null;
-      _daraByYearPanelDefault = null; _daraByYearStore.clear();
-    }
+    _clearOutput();
     _refreshInfoStrip();
     document.getElementById('refcpi-picker').style.display = 'none';
   } catch(e) {
@@ -1253,13 +1294,56 @@ document.getElementById('refcpi-picker-close').addEventListener('click', () => {
 });
 document.getElementById('refcpi-reset-btn').addEventListener('click', () => {
   activeRefCpiDateStr = null;
-  if (_daraAutoInferred) {
-    document.getElementById('dara').value = '';
-    _daraAutoInferred = false; _lastKnownDara = null;
-    _daraByYearPanelDefault = null; _daraByYearStore.clear();
-  }
+  _clearOutput();
   _refreshInfoStrip();
   document.getElementById('refcpi-picker').style.display = 'none';
+});
+
+// ─── TIPS Ref popup ───────────────────────────────────────────────────────────
+function _showTipsRefPopup() {
+  if (!tipsMap || !refCpiRows) return;
+  const dateStr = activeRefCpiDateStr ?? settlementDate.toLocaleDateString('en-CA');
+  const activeRefCPI = lookupRefCpi(refCpiRows, dateStr);
+  const activeLabel = _fmtMDY(dateStr);
+
+  // Bonds sorted by maturity (active/future only)
+  const bonds = [...tipsMap.values()]
+    .filter(b => b.maturity && b.maturity > settlementDate)
+    .sort((a, b) => a.maturity - b.maturity);
+
+  const ov = document.getElementById('tipsref-overlay');
+  document.getElementById('tipsref-title').textContent =
+    'Outstanding TIPS (' + bonds.length + ') · RefCPI as of ' + activeLabel + ' = ' + activeRefCPI.toFixed(5);
+  document.getElementById('tipsref-warn').style.display = 'none';
+
+  const fd = (n, d) => (typeof n === 'number' && !isNaN(n)) ? n.toFixed(d) : '—';
+  const fmtDate = s => s ? _fmtMDY(s) : '—';
+
+  let rows = '';
+  for (const b of bonds) {
+    const ref = tipsRefMap?.get(b.cusip);
+    const ir = activeRefCPI / b.baseCpi;
+    rows +=
+      '<tr>' +
+      '<td>' + b.cusip + '</td>' +
+      '<td style="text-align:right">' + fd(b.baseCpi, 5) + '</td>' +
+      '<td>' + fmtDate(ref?.datedDate) + '</td>' +
+      '<td>' + fmtDate(b.maturity?.toLocaleDateString('en-CA')) + '</td>' +
+      '<td style="text-align:right">' + fd(b.coupon * 100, 3) + '%</td>' +
+      '<td>' + (ref?.term ?? '—') + '</td>' +
+      '<td style="text-align:right">' + fd(ir, 5) + '</td>' +
+      '</tr>';
+  }
+
+  document.getElementById('tipsref-tbody').innerHTML = rows;
+  ov.style.display = 'block';
+}
+
+document.getElementById('tipsref-close').addEventListener('click', () => {
+  document.getElementById('tipsref-overlay').style.display = 'none';
+});
+document.getElementById('tipsref-overlay').addEventListener('click', e => {
+  if (e.target === e.currentTarget) e.currentTarget.style.display = 'none';
 });
 
 loadData();
@@ -1277,6 +1361,31 @@ loadData();
     <div style="margin-top:8px;display:flex;justify-content:space-between;align-items:center;">
       <button id="refcpi-reset-btn" style="background:#f1f5f9;color:#475569;border:1px solid #cbd5e1;font-size:12px;padding:4px 10px;">Use price date</button>
       <button id="refcpi-apply-btn">Apply</button>
+    </div>
+  </div>
+</div>
+
+<!-- TIPS Ref popup -->
+<div id="tipsref-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:150;overflow:hidden;">
+  <div style="background:#fff;max-width:720px;margin:60px auto;border-radius:8px;padding:20px 24px;position:relative;max-height:calc(100vh - 120px);display:flex;flex-direction:column;box-shadow:0 4px 18px rgba(0,0,0,.18);">
+    <button id="tipsref-close" style="position:absolute;top:10px;right:12px;background:none;border:none;font-size:22px;color:#888;cursor:pointer;padding:0;line-height:1;">×</button>
+    <div id="tipsref-title" style="font-size:13px;font-weight:700;color:#1e293b;margin-bottom:8px;padding-right:24px;"></div>
+    <div id="tipsref-warn" style="display:none;margin-bottom:8px;padding:6px 10px;background:#fee2e2;border:1px solid #fca5a5;border-radius:4px;font-size:12px;color:#991b1b;font-weight:600;"></div>
+    <div style="overflow:auto;flex:1;">
+      <table class="simple" style="width:100%;">
+        <thead>
+          <tr>
+            <th style="text-align:left">CUSIP</th>
+            <th>RefCPI</th>
+            <th style="text-align:left">Dated Date</th>
+            <th style="text-align:left">Maturity</th>
+            <th>Coupon</th>
+            <th style="text-align:left">Term</th>
+            <th>Index Ratio</th>
+          </tr>
+        </thead>
+        <tbody id="tipsref-tbody"></tbody>
+      </table>
     </div>
   </div>
 </div>

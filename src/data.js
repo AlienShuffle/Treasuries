@@ -28,12 +28,14 @@ export function lookupRefCpi(refCpiRows, dateStr) {
 }
 
 export async function fetchTipsData() {
-  const [yieldsRes, refCpiRes] = await Promise.all([
+  const [yieldsRes, refCpiRes, tipsRefRes] = await Promise.all([
     fetch(BASE_URL + '/TipsYields.csv'),
     fetch(BASE_URL + '/RefCPI.csv'),
+    fetch(BASE_URL + '/TipsRef.csv'),
   ]);
   if (!yieldsRes.ok) throw new Error('TipsYields.csv: HTTP ' + yieldsRes.status);
   if (!refCpiRes.ok) throw new Error('RefCPI.csv: HTTP ' + refCpiRes.status);
+  if (!tipsRefRes.ok) throw new Error('TipsRef.csv: HTTP ' + tipsRefRes.status);
 
   const yieldsRows = parseCsv(await yieldsRes.text()).map(r => ({
     settlementDate: r.settlementDate,
@@ -50,5 +52,14 @@ export async function fetchTipsData() {
     refCpi: parseFloat(r.refCpi),
   }));
 
-  return { yieldsRows, refCpiRows };
+  const tipsRefRows = parseCsv(await tipsRefRes.text()).map(r => ({
+    cusip:     r.cusip,
+    maturity:  r.maturity,
+    datedDate: r.datedDate,
+    coupon:    parseFloat(r.coupon),
+    baseCpi:   parseFloat(r.baseCpi),
+    term:      r.term,
+  }));
+
+  return { yieldsRows, refCpiRows, tipsRefRows };
 }
