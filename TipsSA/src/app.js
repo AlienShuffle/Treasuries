@@ -7,14 +7,38 @@ const REF_CPI_CSV_URL = `${R2_BASE_URL}/TIPS/RefCpiNsaSa.csv`;
 
 // --- Helpers ---
 function parseCsv(text) {
-  const lines = text.trim().split('\n').filter(l => l.trim());
-  const header = lines[0].split(',');
-  return lines.slice(1).map(line => {
-    const parts = line.split(',');
+  const result = [];
+  const lines = text.split(/\r?\n/).filter(l => l.trim());
+  if (lines.length === 0) return result;
+
+  const parseRow = (line) => {
+    const parts = [];
+    let cur = '';
+    let inQuotes = false;
+    for (let i = 0; i < line.length; i++) {
+      const char = line[i];
+      if (char === '"') inQuotes = !inQuotes;
+      else if (char === ',' && !inQuotes) {
+        parts.push(cur.trim());
+        cur = '';
+      } else {
+        cur += char;
+      }
+    }
+    parts.push(cur.trim());
+    return parts.map(p => p.replace(/^"|"$/g, '').trim());
+  };
+
+  const headers = parseRow(lines[0]);
+  for (let i = 1; i < lines.length; i++) {
+    const values = parseRow(lines[i]);
     const obj = {};
-    header.forEach((h, i) => obj[h.trim()] = parts[i]?.trim());
-    return obj;
-  });
+    headers.forEach((h, idx) => {
+      if (h) obj[h] = values[idx];
+    });
+    result.push(obj);
+  }
+  return result;
 }
 
 function localDate(s) {
@@ -191,21 +215,27 @@ document.getElementById('schwabFile').addEventListener('change', async (e) => {
     const text = await e.target.files[0].text();
     const rows = parseCsv(text);
     const priceMap = new Map();
+    const seenCusips = new Set();
 
     rows.forEach(row => {
-      // Schwab CSV: "Description" contains CUSIP, "Quote" is 'Ask', "Price" is clean price
-      if (row["Quote"] === "Ask") {
-        const desc = row["Description"] || "";
-        const cusipMatch = desc.match(/[A-Z0-9]{9}/);
-        const price = parseFloat((row["Price"] || "").replace(/,/g, ''));
-        if (cusipMatch && !isNaN(price)) {
-          priceMap.set(cusipMatch[0], price);
+      // Find CUSIP in Description
+      const desc = row["Description"] || "";
+      const cusipMatch = desc.match(/[A-Z0-9]{9}/);
+      if (cusipMatch) {
+        const cusip = cusipMatch[0];
+        // The first row we encounter for each CUSIP is the Ask price
+        if (!seenCusips.has(cusip)) {
+          const price = parseFloat((row["Price"] || "").replace(/,/g, ''));
+          if (!isNaN(price)) {
+            priceMap.set(cusip, price);
+          }
+          seenCusips.add(cusip);
         }
       }
     });
 
     if (priceMap.size === 0) {
-      alert("No valid Ask prices found in the Schwab CSV. Ensure it has 'Description' (with CUSIP), 'Quote' (Ask), and 'Price' columns.");
+      alert("No valid prices found in the Schwab CSV. Ensure it has 'Description' (with CUSIP) and 'Price' columns.");
       e.target.value = '';
       return;
     }
@@ -240,6 +270,8 @@ function renderTable(bonds) {
 }
 
 let chart = null;
+let isResizingChart = false;
+
 function renderChart(bonds) {
   const ctx = document.getElementById('yieldChart').getContext('2d');
   
@@ -303,6 +335,12 @@ function renderChart(bonds) {
           pan: {
             enabled: true,
             mode: 'x',
+            onPan: ({chart}) => {
+              if (lockLeftEl.checked) {
+                chart.options.scales.x.min = 0;
+                chart.update('none');
+              }
+            }
           },
           zoom: {
             wheel: {
@@ -318,13 +356,10 @@ function renderChart(bonds) {
               enabled: true
             },
             mode: 'x',
-            onZoomStart: ({chart, event}) => {
-              if (lockLeftEl.checked) {
-                chart.options.scales.x.min = 0;
-              }
-              return true;
-            },
             onZoomComplete: ({chart}) => {
+              if (isResizingChart) return;
+              isResizingChart = true;
+
               const scale = chart.scales.x;
               let minIndex = Math.max(0, Math.round(scale.min));
               let maxIndex = Math.min(labels.length - 1, Math.round(scale.max));
@@ -334,7 +369,10 @@ function renderChart(bonds) {
               }
 
               const visibleCount = maxIndex - minIndex + 1;
-              if (visibleCount <= 0) return;
+              if (visibleCount <= 0 || visibleCount >= labels.length) {
+                isResizingChart = false;
+                return;
+              }
 
               const totalCount = labels.length;
               const factor = totalCount / visibleCount;
@@ -342,15 +380,17 @@ function renderChart(bonds) {
               // Apply physical stretch to container
               resizable.style.width = Math.max(100, factor * 100) + '%';
               
-              // Reset internal zoom so data fills the newly sized canvas
-              // We do this by clearing min/max and calling update
-              chart.options.scales.x.min = undefined;
-              chart.options.scales.x.max = undefined;
-              chart.update('none');
+              // We must wait for the DOM to resize before updating chart
+              setTimeout(() => {
+                chart.resetZoom();
+                chart.options.scales.x.min = undefined;
+                chart.options.scales.x.max = undefined;
+                chart.update('none');
 
-              // Scroll to the previous logical minIndex
-              const scrollPercent = minIndex / totalCount;
-              wrapper.scrollLeft = scrollPercent * resizable.offsetWidth;
+                const scrollPercent = minIndex / totalCount;
+                wrapper.scrollLeft = scrollPercent * resizable.offsetWidth;
+                isResizingChart = false;
+              }, 0);
             }
           }
         },
@@ -366,12 +406,14 @@ function renderChart(bonds) {
   });
 
   document.getElementById('resetZoom').addEventListener('click', () => {
+    isResizingChart = true;
     resizable.style.width = '100%';
     chart.options.scales.x.min = undefined;
     chart.options.scales.x.max = undefined;
     chart.resetZoom();
     chart.update();
     wrapper.scrollLeft = 0;
+    setTimeout(() => { isResizingChart = false; }, 100);
   });
 }
 
