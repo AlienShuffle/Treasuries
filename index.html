@@ -1,18 +1,30 @@
 <!DOCTYPE html>
-<html>
-  <head>
-    <meta charset="UTF-8">
-    <meta http-equiv="refresh" content="0; url=./TipsLadderBuilder/">
-    <script type="text/javascript">
-      window.location.href = "./TipsLadderBuilder/"
-    </script>
-    <title>Redirecting to TIPS Ladder Builder</title>
-    <style>
-      body { font-family: system-ui, sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; background: #fafafa; color: #475569; }
-      a { color: #1a56db; text-decoration: none; font-weight: 600; }
-    </style>
-  </head>
-  <body>
-    <p>Redirecting you to the <a href="./TipsLadderBuilder/">TIPS Ladder Builder</a>...</p>
-  </body>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TIPS Ecosystem Portal</title>
+  <style>
+    body { font-family: system-ui, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; margin: 0; background: #fafafa; color: #1e293b; }
+    h1 { font-size: 24px; margin-bottom: 32px; }
+    .nav { display: flex; gap: 20px; flex-wrap: wrap; justify-content: center; }
+    .card { background: #fff; border: 1px solid #e2e8f0; border-radius: 12px; padding: 24px; width: 280px; text-decoration: none; color: inherit; transition: all 0.2s; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1); }
+    .card:hover { transform: translateY(-4px); box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1); border-color: #1a56db; }
+    .card h2 { margin: 0 0 8px; font-size: 18px; color: #1a56db; }
+    .card p { margin: 0; font-size: 14px; color: #64748b; line-height: 1.5; }
+  </style>
+</head>
+<body>
+  <h1>TIPS Ecosystem</h1>
+  <div class="nav">
+    <a href="./TipsLadderBuilder/" class="card">
+      <h2>Ladder Builder</h2>
+      <p>Design and rebalance your TIPS ladder with automated duration matching.</p>
+    </a>
+    <a href="./TipsSA/" class="card">
+      <h2>Seasonal Adjustments</h2>
+      <p>Analyze seasonally-adjusted yields and compare across the maturity curve.</p>
+    </a>
+  </div>
+</body>
 </html>
