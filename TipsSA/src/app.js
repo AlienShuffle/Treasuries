@@ -332,66 +332,10 @@ function renderChart(bonds) {
       },
       plugins: {
         zoom: {
-          pan: {
-            enabled: true,
-            mode: 'x',
-            onPan: ({chart}) => {
-              if (lockLeftEl.checked) {
-                chart.options.scales.x.min = 0;
-                chart.update('none');
-              }
-            }
-          },
           zoom: {
-            wheel: {
-              enabled: true,
-            },
-            drag: {
-              enabled: true,
-              backgroundColor: 'rgba(26, 86, 219, 0.1)',
-              borderColor: 'rgba(26, 86, 219, 0.4)',
-              borderWidth: 1,
-            },
-            pinch: {
-              enabled: true
-            },
-            mode: 'x',
-            onZoomComplete: ({chart}) => {
-              if (isResizingChart) return;
-              isResizingChart = true;
-
-              const scale = chart.scales.x;
-              let minIndex = Math.max(0, Math.round(scale.min));
-              let maxIndex = Math.min(labels.length - 1, Math.round(scale.max));
-
-              if (lockLeftEl.checked) {
-                minIndex = 0;
-              }
-
-              const visibleCount = maxIndex - minIndex + 1;
-              if (visibleCount <= 0 || visibleCount >= labels.length) {
-                isResizingChart = false;
-                return;
-              }
-
-              const totalCount = labels.length;
-              const factor = totalCount / visibleCount;
-              
-              // Apply physical stretch to container
-              resizable.style.width = Math.max(100, factor * 100) + '%';
-              
-              // We must wait for the DOM to resize before updating chart
-              setTimeout(() => {
-                chart.resetZoom();
-                chart.options.scales.x.min = undefined;
-                chart.options.scales.x.max = undefined;
-                chart.update('none');
-
-                const scrollPercent = minIndex / totalCount;
-                wrapper.scrollLeft = scrollPercent * resizable.offsetWidth;
-                isResizingChart = false;
-              }, 0);
-            }
+            wheel: { enabled: true },
+            pinch: { enabled: true },
+            mode: 'x'
           }
         },
         tooltip: {
@@ -405,15 +349,73 @@ function renderChart(bonds) {
     }
   });
 
+  // Custom Selection Zoom Logic
+  let dragStart = null;
+  let selectionBox = document.createElement('div');
+  selectionBox.style.cssText = 'position:absolute; background:rgba(26, 86, 219, 0.1); border:1px solid #1a56db; display:none; pointer-events:none; z-index:5;';
+  ctx.canvas.parentElement.appendChild(selectionBox);
+
+  ctx.canvas.addEventListener('mousedown', e => {
+    if (e.button !== 0) return; // Only left click
+    const rect = ctx.canvas.getBoundingClientRect();
+    dragStart = e.clientX - rect.left;
+    selectionBox.style.display = 'block';
+    selectionBox.style.top = '0';
+    selectionBox.style.height = '100%';
+  });
+
+  window.addEventListener('mousemove', e => {
+    if (dragStart === null) return;
+    const rect = ctx.canvas.getBoundingClientRect();
+    const curX = Math.max(0, Math.min(e.clientX - rect.left, rect.width));
+    selectionBox.style.left = Math.min(dragStart, curX) + 'px';
+    selectionBox.style.width = Math.abs(curX - dragStart) + 'px';
+  });
+
+  window.addEventListener('mouseup', e => {
+    if (dragStart === null) return;
+    const rect = ctx.canvas.getBoundingClientRect();
+    const dragEnd = Math.max(0, Math.min(e.clientX - rect.left, rect.width));
+    selectionBox.style.display = 'none';
+
+    const minX = Math.min(dragStart, dragEnd);
+    const maxX = Math.max(dragStart, dragEnd);
+    const width = maxX - minX;
+
+    if (width > 10) {
+      // Logic: convert pixel range to index range
+      const scale = chart.scales.x;
+      let leftIndex = scale.getValueForPixel(minX);
+      let rightIndex = scale.getValueForPixel(maxX);
+
+      if (lockLeftEl.checked) leftIndex = 0;
+
+      const visibleCount = rightIndex - leftIndex;
+      if (visibleCount > 0) {
+        const totalCount = labels.length;
+        const factor = totalCount / visibleCount;
+        
+        // Stretch the container
+        const currentWidthPercent = parseFloat(resizable.style.width) || 100;
+        const newWidthPercent = Math.min(2000, currentWidthPercent * factor);
+        resizable.style.width = newWidthPercent + '%';
+
+        // Update chart and scroll
+        chart.update('none');
+        setTimeout(() => {
+          const scrollPercent = leftIndex / totalCount;
+          wrapper.scrollLeft = scrollPercent * resizable.offsetWidth;
+        }, 0);
+      }
+    }
+    dragStart = null;
+  });
+
   document.getElementById('resetZoom').addEventListener('click', () => {
-    isResizingChart = true;
     resizable.style.width = '100%';
-    chart.options.scales.x.min = undefined;
-    chart.options.scales.x.max = undefined;
     chart.resetZoom();
     chart.update();
     wrapper.scrollLeft = 0;
-    setTimeout(() => { isResizingChart = false; }, 100);
   });
 }
 
