@@ -1,7 +1,8 @@
 // TIPS Seasonal Adjustment (TipsSA) Frontend Logic
 
-const YIELDS_CSV_URL = `/TipsSA/data/TipsYields.csv`;
-const REF_CPI_CSV_URL = `/TipsSA/data/RefCpiNsaSa.csv`;
+const YIELDS_CSV_URL = `/TIPS/TipsSA/data/TipsYields.csv`;
+const REF_CPI_CSV_URL = `/TIPS/TipsSA/data/RefCpiNsaSa.csv`;
+
 
 // --- Helpers ---
 function parseCsv(text) {
@@ -101,22 +102,31 @@ async function init() {
   const statusEl = document.getElementById('status');
   
   try {
+    console.log('Fetching:', YIELDS_CSV_URL, REF_CPI_CSV_URL);
     const [yieldsRes, refCpiRes] = await Promise.all([
-      fetch(YIELDS_CSV_URL),
-      fetch(REF_CPI_CSV_URL)
+      fetch(YIELDS_CSV_URL).catch(e => ({ ok: false, error: e })),
+      fetch(REF_CPI_CSV_URL).catch(e => ({ ok: false, error: e }))
     ]);
 
-    if (!yieldsRes.ok || !refCpiRes.ok) throw new Error("Failed to fetch data from R2");
+    if (!yieldsRes.ok) {
+      const err = yieldsRes.error ? yieldsRes.error.message : `Status ${yieldsRes.status}`;
+      throw new Error(`Failed to fetch yields: ${err} (${YIELDS_CSV_URL})`);
+    }
+    if (!refCpiRes.ok) {
+      const err = refCpiRes.error ? refCpiRes.error.message : `Status ${refCpiRes.status}`;
+      throw new Error(`Failed to fetch RefCPI data: ${err} (${REF_CPI_CSV_URL})`);
+    }
 
     rawYieldsData = parseCsv(await yieldsRes.text());
     rawRefCpiData = parseCsv(await refCpiRes.text());
 
+    console.log('Data loaded:', rawYieldsData.length, 'yields,', rawRefCpiData.length, 'CPI rows');
     processAndRender();
 
   } catch (err) {
     statusEl.textContent = `Error: ${err.message}`;
     statusEl.className = 'error';
-    console.error(err);
+    console.error('Initialization failed:', err);
   }
 }
 
