@@ -12,3 +12,4 @@ lerna-debug.log*
 /TipsLadderBuilder/test-results/
 /TipsLadderBuilder/node_modules/
 /TipsSA/node_modules/
+/TipsSA/data/*.csv
