@@ -4,6 +4,11 @@ const R2_BASE_URL = 'https://pub-ba11062b177640459f72e0a88d0261ae.r2.dev';
 const YIELDS_CSV_URL = `${R2_BASE_URL}/TIPS/TipsYields.csv`;
 const REF_CPI_CSV_URL = `${R2_BASE_URL}/TIPS/RefCpiNsaSa.csv`;
 
+// --- Outlier Adjustments (SAO) ---
+const outlierAdjustments = {
+  '91282CEJ6': { type: 'fit', label: 'Apr 2027' }, // Fit to curve
+  '9128282L3': { type: 'bump', bp: 5, label: 'Jul 2027' } // Bump up 5bps
+};
 
 // --- Helpers ---
 function parseCsv(text) {
@@ -166,14 +171,11 @@ function processAndRender() {
   infoEl.textContent = `Prices as of ${settleDateStr} · Reference CPI / SA factors from R2`;
   priceSourceEl.style.display = schwabPrices ? 'block' : 'none';
 
-  const processedBonds = rawYieldsData.map(bond => {
+  // 1. Initial Processing
+  const allProcessed = rawYieldsData.map(bond => {
     const coupon = parseFloat(bond.coupon);
     let price = parseFloat(bond.price);
-    
-    // Override with Schwab Ask price if available
-    if (schwabPrices && schwabPrices.has(bond.cusip)) {
-      price = schwabPrices.get(bond.cusip);
-    }
+    if (schwabPrices && schwabPrices.has(bond.cusip)) price = schwabPrices.get(bond.cusip);
 
     const mmddSettle = bond.settlementDate.slice(5, 10);
     const mmddMature = bond.maturity.slice(5, 10);
@@ -183,25 +185,57 @@ function processAndRender() {
 
     if (!saSettle || !saMature) return null;
 
-    const priceSaFactor = saSettle / saMature;
-    const saPrice = price * priceSaFactor;
-
     const askYield = yieldFromPrice(price, coupon, bond.settlementDate, bond.maturity);
-    const saYield = yieldFromPrice(saPrice, coupon, bond.settlementDate, bond.maturity);
+    const saYield = yieldFromPrice(price * (saSettle / saMature), coupon, bond.settlementDate, bond.maturity);
 
-    return {
-      ...bond,
-      coupon,
-      price,
-      askYield,
-      saYield,
-      diffBps: (saYield - askYield) * 10000
-    };
-  }).filter(b => b !== null);
+    return { ...bond, coupon, price, askYield, saYield, maturityDate: localDate(bond.maturity) };
+  }).filter(b => b !== null).sort((a, b) => a.maturityDate - b.maturityDate);
 
-  renderTable(processedBonds);
-  renderChart(processedBonds);
-  statusEl.textContent = `Successfully loaded ${processedBonds.length} TIPS bonds.`;
+  // 2. Apply SAO (Outlier Adjustments)
+  allProcessed.forEach((bond, i) => {
+    bond.saoYield = bond.saYield;
+    const adj = outlierAdjustments[bond.cusip];
+    if (adj) {
+      if (adj.type === 'fit') {
+        const prev = allProcessed[i-1], next = allProcessed[i+1];
+        if (prev && next) bond.saoYield = (prev.saYield + next.saYield) / 2;
+        else if (prev) bond.saoYield = prev.saYield;
+        else if (next) bond.saoYield = next.saYield;
+      } else if (adj.type === 'bump') {
+        bond.saoYield += adj.bp / 10000;
+      }
+    }
+    bond.diffBps = (bond.saYield - bond.askYield) * 10000;
+  });
+
+  // 3. Range Filter Dropdowns
+  const startSel = document.getElementById('startMaturity');
+  const endSel = document.getElementById('endMaturity');
+  
+  if (startSel.options.length === 0) {
+    allProcessed.forEach((b, i) => {
+      const opt = (selected) => {
+        const o = document.createElement('option');
+        o.value = b.maturity; o.textContent = fmtMMM(b.maturity);
+        if (selected) o.selected = true;
+        return o;
+      };
+      startSel.appendChild(opt(i === 0));
+      endSel.appendChild(opt(i === allProcessed.length - 1));
+    });
+    
+    const trigger = () => processAndRender();
+    startSel.onchange = trigger;
+    endSel.onchange = trigger;
+  }
+
+  const startDate = localDate(startSel.value);
+  const endDate = localDate(endSel.value);
+  const filteredBonds = allProcessed.filter(b => b.maturityDate >= startDate && b.maturityDate <= endDate);
+
+  renderTable(filteredBonds);
+  renderChart(filteredBonds);
+  statusEl.textContent = `Successfully loaded ${filteredBonds.length} TIPS bonds.`;
 }
 
 document.getElementById('schwabFile').addEventListener('change', async (e) => {
@@ -218,24 +252,20 @@ document.getElementById('schwabFile').addEventListener('change', async (e) => {
     const seenCusips = new Set();
 
     rows.forEach(row => {
-      // Find CUSIP in Description
       const desc = row["Description"] || "";
       const cusipMatch = desc.match(/[A-Z0-9]{9}/);
       if (cusipMatch) {
         const cusip = cusipMatch[0];
-        // The first row we encounter for each CUSIP is the Ask price
         if (!seenCusips.has(cusip)) {
           const price = parseFloat((row["Price"] || "").replace(/,/g, ''));
-          if (!isNaN(price)) {
-            priceMap.set(cusip, price);
-          }
+          if (!isNaN(price)) priceMap.set(cusip, price);
           seenCusips.add(cusip);
         }
       }
     });
 
     if (priceMap.size === 0) {
-      alert("No valid prices found in the Schwab CSV. Ensure it has 'Description' (with CUSIP) and 'Price' columns.");
+      alert("No valid prices found in the Schwab CSV.");
       e.target.value = '';
       return;
     }
@@ -244,7 +274,6 @@ document.getElementById('schwabFile').addEventListener('change', async (e) => {
     processAndRender();
   } catch (err) {
     alert("Error parsing Schwab CSV: " + err.message);
-    console.error(err);
   }
 });
 
@@ -270,23 +299,14 @@ function renderTable(bonds) {
 }
 
 let chart = null;
-let isResizingChart = false;
-
 function renderChart(bonds) {
   const ctx = document.getElementById('yieldChart').getContext('2d');
-  
-  // Sort bonds by maturity for the chart
-  const sorted = [...bonds].sort((a, b) => localDate(a.maturity) - localDate(b.maturity));
-  
-  const labels = sorted.map(b => fmtMMM(b.maturity));
-  const askYields = sorted.map(b => (b.askYield * 100).toFixed(3));
-  const saYields = sorted.map(b => (b.saYield * 100).toFixed(3));
+  const labels = bonds.map(b => fmtMMM(b.maturity));
+  const askYields = bonds.map(b => (b.askYield * 100).toFixed(3));
+  const saYields = bonds.map(b => (b.saYield * 100).toFixed(3));
+  const saoYields = bonds.map(b => (b.saoYield * 100).toFixed(3));
 
   if (chart) chart.destroy();
-
-  const lockLeftEl = document.getElementById('lockLeft');
-  const resizable = document.getElementById('chartResizable');
-  const wrapper = document.getElementById('chartWrapper');
 
   chart = new Chart(ctx, {
     type: 'line',
@@ -298,16 +318,26 @@ function renderChart(bonds) {
           data: askYields,
           borderColor: '#94a3b8',
           backgroundColor: 'transparent',
-          borderWidth: 2,
-          pointRadius: 3,
+          borderWidth: 1.5,
+          pointRadius: 2,
           tension: 0.1
         },
         {
           label: 'SA Yield (%)',
           data: saYields,
+          borderColor: '#94a3b8',
+          borderDash: [5, 5],
+          backgroundColor: 'transparent',
+          borderWidth: 1,
+          pointRadius: 0,
+          tension: 0.1
+        },
+        {
+          label: 'SAO Yield (%)',
+          data: saoYields,
           borderColor: '#1a56db',
           backgroundColor: 'transparent',
-          borderWidth: 2,
+          borderWidth: 2.5,
           pointRadius: 3,
           tension: 0.1
         }
@@ -316,73 +346,26 @@ function renderChart(bonds) {
     options: {
       responsive: true,
       maintainAspectRatio: false,
-      interaction: {
-        mode: 'index',
-        intersect: false,
-      },
+      interaction: { mode: 'index', intersect: false },
       scales: {
-        x: {
-          display: true,
-          title: { display: true, text: 'Maturity' }
-        },
-        y: {
-          display: true,
-          title: { display: true, text: 'Yield (%)' }
-        }
+        x: { display: true, title: { display: true, text: 'Maturity' } },
+        y: { display: true, title: { display: true, text: 'Yield (%)' } }
       },
       plugins: {
         zoom: {
-          limits: {
-            x: {
-              min: 'original',
-              max: 'original'
-            }
-          },
-          pan: {
-            enabled: true,
-            mode: 'x',
-          },
-          zoom: {
-            wheel: { enabled: true },
-            pinch: { enabled: true },
-            mode: 'x',
-          }
+          pan: { enabled: true, mode: 'x' },
+          zoom: { wheel: { enabled: true }, pinch: { enabled: true }, mode: 'x' }
         },
         tooltip: {
           callbacks: {
-            label: function(context) {
-              return `${context.dataset.label}: ${context.parsed.y}%`;
-            }
+            label: (context) => `${context.dataset.label}: ${context.parsed.y}%`
           }
         }
       }
     }
   });
 
-  // Handle Lock Left logic
-  function updateZoomLimits() {
-    if (lockLeftEl.checked) {
-      chart.options.plugins.zoom.limits.x.min = 0;
-      // If currently panned right, snap back to 0
-      if (chart.scales.x.min > 0) {
-        chart.options.scales.x.min = 0;
-        chart.update();
-      }
-    } else {
-      chart.options.plugins.zoom.limits.x.min = 'original';
-    }
-  }
-
-  lockLeftEl.addEventListener('change', updateZoomLimits);
-  updateZoomLimits();
-
-  document.getElementById('resetZoom').addEventListener('click', () => {
-    chart.resetZoom();
-    chart.options.scales.x.min = undefined;
-    chart.options.scales.x.max = undefined;
-    updateZoomLimits();
-    chart.update();
-  });
+  document.getElementById('resetZoom').onclick = () => chart.resetZoom();
 }
 
 init();
