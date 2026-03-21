@@ -283,7 +283,7 @@ function processAndRender() {
 
   renderTable(filteredBonds);
   renderChart(filteredBonds);
-  statusEl.textContent = `Successfully loaded ${filteredBonds.length} TIPS bonds.`;
+  statusEl.textContent = `Successfully loaded ${filteredBonds.length} TIPS.`;
 }
 
 document.getElementById('brokerFile').addEventListener('change', async (e) => {
@@ -293,20 +293,32 @@ document.getElementById('brokerFile').addEventListener('change', async (e) => {
     const rows = parseCsv(text);
     const priceMap = new Map();
     const seenCusips = new Set();
+    
     rows.forEach(row => {
+      // 1. Check for standard format (CUSIP in Description)
       const desc = row["Description"] || "";
+      let cusip = null;
+      let priceStr = null;
+
       const cusipMatch = desc.match(/[A-Z0-9]{9}/);
       if (cusipMatch) {
-        const cusip = cusipMatch[0];
-        if (!seenCusips.has(cusip)) {
-          const price = parseFloat((row["Price"] || "").replace(/,/g, ''));
-          if (!isNaN(price)) priceMap.set(cusip, price);
-          seenCusips.add(cusip);
-        }
+        cusip = cusipMatch[0];
+        priceStr = row["Price"];
+      } else if (row["Cusip"]) {
+        // 2. Check for Fidelity/Quotes format (Explicit Cusip column)
+        cusip = row["Cusip"];
+        priceStr = row["Price Ask"];
+      }
+
+      if (cusip && !seenCusips.has(cusip)) {
+        const price = parseFloat((priceStr || "").replace(/,/g, ''));
+        if (!isNaN(price)) priceMap.set(cusip, price);
+        seenCusips.add(cusip);
       }
     });
+
     if (priceMap.size === 0) {
-      alert("No valid prices found in the CSV.");
+      alert("No valid prices found in the CSV. (Supported: Schwab Brokerage, Fidelity Quotes)");
       e.target.value = '';
       return;
     }
