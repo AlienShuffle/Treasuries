@@ -1,5 +1,5 @@
 {
-  "name": "tips-ladder-builder",
+  "name": "tips-ladder-manager",
   "type": "module",
   "scripts": {
     "test": "node tests/run.js",

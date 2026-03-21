@@ -1,8 +1,8 @@
-# TIPS Ladder Builder
+# TIPS Ladder Manager
 
 A free, browser-based tool for building and rebalancing [TIPS](https://www.treasurydirect.gov/marketable-securities/tips/) (Treasury Inflation-Protected Securities) ladders.
 
-**Live app:** https://aerokam.github.io/TIPS/TipsLadderBuilder/
+**Live app:** https://aerokam.github.io/TIPS/TipsLadderManager/
 
 All calculations run locally in your browser — no data is uploaded anywhere.
 
@@ -44,10 +44,10 @@ Prices are fetched from FedInvest once daily by GitHub Actions and uploaded to C
 
 ## Running Locally
 
-No build step required — open `TipsLadderBuilder/index.html` in a browser, or serve the project root with any static file server:
+No build step required — open `TipsLadderManager/index.html` in a browser, or serve the project root with any static file server:
 
 ```bash
 npx serve .
 ```
 
-Then navigate to `http://localhost:8080/TipsLadderBuilder/` (default port 8080).
+Then navigate to `http://localhost:8080/TipsLadderManager/` (default port 8080).

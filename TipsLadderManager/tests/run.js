@@ -42,8 +42,8 @@ function lookupRefCpi(refCpiRows, dateStr) {
 }
 
 // ── Load shared data ──────────────────────────────────────────────────────────
-const yieldsPath = path.resolve('./TipsLadderBuilder/tests/e2e/TipsYields.csv');
-const refCpiPath = path.resolve('./TipsLadderBuilder/tests/e2e/RefCPI.csv');
+const yieldsPath = path.resolve('./tests/e2e/TipsYields.csv');
+const refCpiPath = path.resolve('./tests/e2e/RefCPI.csv');
 
 console.log(`[Test Setup] Market Data:   ${yieldsPath}`);
 const yieldsRows = parseCsv(readFileSync(yieldsPath, 'utf8')).map(r => ({
@@ -127,10 +127,10 @@ function runFullRebalanceTest(name, filePath) {
 // ── Run tests on known files and local dev files ──────────────────────────────
 
 // 1. Standard public test file
-runFullRebalanceTest('CusipQtyTestLumpy', './TipsLadderBuilder/tests/CusipQtyTestLumpy.csv');
+runFullRebalanceTest('CusipQtyTestLumpy', './tests/CusipQtyTestLumpy.csv');
 
 // 2. All local CSVs in tests/dev/
-const devDir = './TipsLadderBuilder/tests/dev';
+const devDir = './tests/dev';
 if (existsSync(devDir)) {
   readdirSync(devDir).forEach(file => {
     if (file.endsWith('.csv')) {

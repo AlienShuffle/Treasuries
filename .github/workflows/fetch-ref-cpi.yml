@@ -22,7 +22,7 @@ jobs:
     
     defaults:
       run:
-        working-directory: TipsLadderBuilder
+        working-directory: TipsLadderManager
 
     steps:
       - uses: actions/checkout@v4

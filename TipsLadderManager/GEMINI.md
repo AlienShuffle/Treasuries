@@ -1,7 +1,7 @@
-# GEMINI.md - TipsLadderBuilder Context
+# GEMINI.md - TipsLadderManager Context
 
 ## Project Overview
-TipsLadderBuilder is a browser-based, privacy-first tool for designing and rebalancing **TIPS (Treasury Inflation-Protected Securities) ladders**. It is designed to be both a practical financial utility and an educational resource, where every calculation is transparent and traceable to first principles.
+TipsLadderManager is a browser-based, privacy-first tool for designing and rebalancing **TIPS (Treasury Inflation-Protected Securities) ladders**. It is designed to be both a practical financial utility and educational resource, where every calculation is transparent and traceable to first principles.
 
 ### Core Objectives
 - **Build Mode**: Construct a new TIPS ladder from scratch given a target annual real amount (DARA) and time horizon.
