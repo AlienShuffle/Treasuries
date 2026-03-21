@@ -379,7 +379,7 @@ function renderChart(bonds) {
           borderColor: '#1a56db', // Bold Blue
           backgroundColor: '#1a56db',
           borderWidth: 2.2,
-          pointRadius: 4,
+          pointRadius: 3, // Smaller point size
           pointStyle: 'circle',
           tension: 0.1,
           order: 1
@@ -390,10 +390,9 @@ function renderChart(bonds) {
           borderColor: '#475569', // Dark Gray
           backgroundColor: '#475569',
           borderWidth: 1.8,
-          pointRadius: 5,
+          pointRadius: 4, // Slightly smaller
           pointStyle: 'crossRot', // X shape
-          borderDash: [4, 2],
-          tension: 0.1,
+          tension: 0.1, // All solid lines
           order: 2
         },
         {
@@ -402,7 +401,7 @@ function renderChart(bonds) {
           borderColor: '#94a3b8', // Medium Gray
           backgroundColor: '#94a3b8',
           borderWidth: 1.5,
-          pointRadius: 4,
+          pointRadius: 3.5, // Slightly smaller
           pointStyle: 'rect', // Square
           tension: 0.1,
           order: 3
@@ -434,7 +433,10 @@ function renderChart(bonds) {
           title: { display: true, text: 'Yield (%)' },
           min: minY,
           max: maxY,
-          beginAtZero: false
+          beginAtZero: false,
+          ticks: {
+            stepSize: 0.25 // Force equally spaced gridlines at 0.25 resolution
+          }
         }
       },
       plugins: {
