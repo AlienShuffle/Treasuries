@@ -348,10 +348,17 @@ let chart = null;
 function renderChart(bonds) {
   const ctx = document.getElementById('yieldChart').getContext('2d');
   
-  // Use Numbers, not strings, for linear scales to ensure proper range calculation and zooming
+  if (bonds.length === 0) return;
+
+  // Use Numbers for linear scales
   const askData = bonds.map(b => ({ x: b.maturityDate.getTime(), y: parseFloat((b.askYield * 100).toFixed(3)) }));
   const saData = bonds.map(b => ({ x: b.maturityDate.getTime(), y: parseFloat((b.saYield * 100).toFixed(3)) }));
   const saoData = bonds.map(b => ({ x: b.maturityDate.getTime(), y: parseFloat((b.saoYield * 100).toFixed(3)) }));
+
+  // Explicitly set X bounds to prevent the "Sep 2020" default behavior
+  const minX = Math.min(...askData.map(d => d.x));
+  const maxX = Math.max(...askData.map(d => d.x));
+  const xPadding = (maxX - minX) * 0.03;
 
   if (chart) chart.destroy();
 
@@ -360,48 +367,53 @@ function renderChart(bonds) {
     data: {
       datasets: [
         {
-          label: 'Ask Yield (%)',
-          data: askData,
-          borderColor: '#cbd5e1', // Light gray
-          backgroundColor: 'transparent',
-          borderWidth: 1,
-          pointRadius: 2,
+          label: 'SAO Yield (%)',
+          data: saoData,
+          borderColor: '#1a56db', // Bold Blue
+          backgroundColor: '#1a56db',
+          borderWidth: 2.2,
+          pointRadius: 4,
+          pointStyle: 'rectRot', // Diamond
           tension: 0.1,
-          order: 3
+          order: 1
         },
         {
           label: 'SA Yield (%)',
           data: saData,
-          borderColor: '#475569', // Darker gray
-          borderDash: [5, 5],
-          backgroundColor: 'transparent',
-          borderWidth: 1.5,
-          pointRadius: 0,
+          borderColor: '#475569', // Dark Gray
+          backgroundColor: '#475569',
+          borderWidth: 1.8,
+          pointRadius: 4,
+          pointStyle: 'circle',
+          borderDash: [4, 2], // Subtle dash to distinguish from SAO
           tension: 0.1,
           order: 2
         },
         {
-          label: 'SAO Yield (%)',
-          data: saoData,
-          borderColor: '#1a56db', // Bold Blue
-          backgroundColor: 'transparent',
-          borderWidth: 3.5, // Even bolder
-          pointRadius: 3,
+          label: 'Ask Yield (%)',
+          data: askData,
+          borderColor: '#94a3b8', // Medium Gray (more visible than light gray)
+          backgroundColor: '#94a3b8',
+          borderWidth: 1.5,
+          pointRadius: 4,
+          pointStyle: 'crossRot', // X shape
           tension: 0.1,
-          order: 1
+          order: 3
         }
       ]
     },
     options: {
       responsive: true,
       maintainAspectRatio: false,
-      animation: false, // Disable animations for faster response during zoom/pan
+      animation: false,
       interaction: { mode: 'index', intersect: false },
       scales: {
         x: { 
           type: 'linear',
           display: true, 
           title: { display: true, text: 'Maturity' },
+          min: minX - xPadding,
+          max: maxX + xPadding,
           ticks: {
             callback: (val) => {
               const date = new Date(val);
@@ -413,20 +425,20 @@ function renderChart(bonds) {
           type: 'linear',
           display: true, 
           title: { display: true, text: 'Yield (%)' },
-          beginAtZero: false, // Don't force 0, let data fill the space
-          grace: '5%' // Small padding at top/bottom
+          beginAtZero: false,
+          grace: '10%'
         }
       },
       plugins: {
         zoom: {
           pan: { 
             enabled: true, 
-            mode: 'x', // Toggle to 'y' on Ctrl
+            mode: 'x',
           },
           zoom: { 
             wheel: { enabled: true }, 
             pinch: { enabled: true }, 
-            mode: 'xy' // Always zoom both to allow "filling the space"
+            mode: 'xy'
           }
         },
         tooltip: {
