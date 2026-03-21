@@ -146,8 +146,7 @@ async function init() {
   }
 }
 
-// 1-2-1 Weighted Moving Average for SAO
-// REPLACED by Backwards-Anchored Trend Fitting
+// Backwards-Anchored Trend Fitting for SAO
 function calculateSAO(bonds) {
   const n = bonds.length;
   const sao = new Array(n);
@@ -159,43 +158,40 @@ function calculateSAO(bonds) {
     const yearsToMat = (bond.maturityDate - now) / 31557600000;
 
     // 1. Long end (> 7 years): SAO strictly follows SA
-    if (yearsToMat > 7 || i > n - 5) {
+    if (yearsToMat > 7 || i > n - 4) {
       sao[i] = bond.saYield;
       continue;
     }
 
     // 2. Short to Medium end: Fit to the trend established by longer maturities
-    // Use a window of the next 5 bonds to project the "ideal" yield for this maturity
-    const windowSize = Math.min(5, n - 1 - i);
-    let sumX = 0, sumY = 0, sumXY = 0, sumX2 = 0;
+    const windowSize = 4;
+    const actualWindow = Math.min(windowSize, n - 1 - i);
     
-    for (let j = 1; j <= windowSize; j++) {
-      // X = days from current bond maturity
+    let sumX = 0, sumY = 0, sumXY = 0, sumX2 = 0;
+    for (let j = 1; j <= actualWindow; j++) {
       const x = (bonds[i + j].maturityDate - bond.maturityDate) / 86400000;
       const y = sao[i + j];
       sumX += x; sumY += y; sumXY += x * y; sumX2 += x * x;
     }
 
-    const slope = (windowSize * sumXY - sumX * sumY) / (windowSize * sumX2 - sumX * sumX);
-    const intercept = (sumY - slope * sumX) / windowSize;
+    const slope = (actualWindow * sumXY - sumX * sumY) / (actualWindow * sumX2 - sumX * sumX);
+    const intercept = (sumY - slope * sumX) / actualWindow;
+    const projected = intercept;
 
-    // Projected yield based on the trend from the right
-    let projected = intercept;
-
-    // Constraint: If trend is positive (sloping up to the right), 
-    // the shorter maturity yield must not exceed the next longer one.
-    if (slope > 0) {
-      projected = Math.min(projected, sao[i + 1]);
-    }
-
-    // 3. Blend logic:
-    // As we get closer to the short end, we trust the trend more than the individual bond's SA yield
-    // (because the "outlier" component O increases near maturity)
-    let trendWeight = 0.5; // Default 50/50 blend
-    if (yearsToMat < 2) trendWeight = 0.85; // < 2 years: mostly trust the curve
+    // 3. Blend logic
+    let trendWeight = 0.5;
+    if (yearsToMat < 2) trendWeight = 0.9;
     else if (yearsToMat < 4) trendWeight = 0.7;
 
-    sao[i] = (projected * trendWeight) + (bond.saYield * (1 - trendWeight));
+    let candidate = (projected * trendWeight) + (bond.saYield * (1 - trendWeight));
+
+    // 4. Strict Monotonicity Constraint (Right-to-Left)
+    // If curve is positive (increasing to the right), shorter must be <= longer.
+    if (i < n - 1) {
+      candidate = Math.min(candidate, sao[i + 1]);
+    }
+
+    sao[i] = candidate;
   }
   return sao;
 }
@@ -207,6 +203,7 @@ function processAndRender() {
   const infoEl = document.getElementById('info-strip');
   const priceSourceEl = document.getElementById('priceSource');
   const sourceLabelEl = document.getElementById('priceSourceLabel');
+  const yMinEl = document.getElementById('yMin');
 
   const fedSettleStr = rawYieldsData[0]?.settlementDate;
   
@@ -219,6 +216,7 @@ function processAndRender() {
     infoEl.textContent = `FedInvest Prices as of ${fedSettleStr} · Reference CPI / SA factors from R2`;
   }
 
+  // 1. Initial Processing
   const allProcessed = rawYieldsData.map(bond => {
     const coupon = parseFloat(bond.coupon);
     let price = parseFloat(bond.price);
@@ -246,12 +244,14 @@ function processAndRender() {
     return { ...bond, coupon, price, askYield, saYield, maturityDate: localDate(bond.maturity) };
   }).filter(b => b !== null).sort((a, b) => a.maturityDate - b.maturityDate);
 
+  // 2. Generate SAO Yields (Smoothed SA)
   const smoothed = calculateSAO(allProcessed);
   allProcessed.forEach((b, i) => {
     b.saoYield = smoothed[i];
     b.diffBps = (b.saYield - b.askYield) * 10000;
   });
 
+  // 3. Setup Range Filter Dropdowns
   const startSel = document.getElementById('startMaturity');
   const endSel = document.getElementById('endMaturity');
   if (startSel.options.length === 0) {
@@ -267,6 +267,7 @@ function processAndRender() {
     });
     startSel.onchange = () => processAndRender();
     endSel.onchange = () => processAndRender();
+    yMinEl.onchange = () => processAndRender();
   }
 
   const startDate = localDate(startSel.value);
@@ -274,7 +275,7 @@ function processAndRender() {
   const filteredBonds = allProcessed.filter(b => b.maturityDate >= startDate && b.maturityDate <= endDate);
 
   renderTable(filteredBonds);
-  renderChart(filteredBonds);
+  renderChart(filteredBonds, parseFloat(yMinEl.value));
   statusEl.textContent = `Successfully loaded ${filteredBonds.length} TIPS bonds.`;
 }
 
@@ -337,7 +338,7 @@ function renderTable(bonds) {
 }
 
 let chart = null;
-function renderChart(bonds) {
+function renderChart(bonds, yMin) {
   const ctx = document.getElementById('yieldChart').getContext('2d');
   const labels = bonds.map(b => fmtMMM(b.maturity));
   const askYields = bonds.map(b => (b.askYield * 100).toFixed(3));
@@ -354,30 +355,33 @@ function renderChart(bonds) {
         {
           label: 'Ask Yield (%)',
           data: askYields,
-          borderColor: '#64748b',
+          borderColor: '#cbd5e1', // Light gray
           backgroundColor: 'transparent',
-          borderWidth: 1.5,
+          borderWidth: 1,
           pointRadius: 2,
-          tension: 0.1
+          tension: 0.1,
+          order: 3
         },
         {
           label: 'SA Yield (%)',
           data: saYields,
-          borderColor: '#475569',
+          borderColor: '#475569', // Darker gray
           borderDash: [5, 5],
           backgroundColor: 'transparent',
-          borderWidth: 1,
+          borderWidth: 1.5,
           pointRadius: 0,
-          tension: 0.1
+          tension: 0.1,
+          order: 2
         },
         {
           label: 'SAO Yield (%)',
           data: saoYields,
-          borderColor: '#1a56db',
+          borderColor: '#1a56db', // Bold Blue
           backgroundColor: 'transparent',
-          borderWidth: 2.5,
+          borderWidth: 3,
           pointRadius: 3,
-          tension: 0.1
+          tension: 0.1,
+          order: 1
         }
       ]
     },
@@ -387,7 +391,11 @@ function renderChart(bonds) {
       interaction: { mode: 'index', intersect: false },
       scales: {
         x: { display: true, title: { display: true, text: 'Maturity' } },
-        y: { display: true, title: { display: true, text: 'Yield (%)' } }
+        y: { 
+          display: true, 
+          title: { display: true, text: 'Yield (%)' },
+          min: isNaN(yMin) ? undefined : yMin
+        }
       },
       plugins: {
         zoom: {
