@@ -307,7 +307,7 @@ async function updateAllData() {
   statusEl.textContent = `Updating charts...`;
 
   const isIntraday = activeRange === '2D' || activeRange === '10D';
-  const shouldSlant = activeRange !== '2D';
+  const shouldSlant = activeRange === '2D';
 
   const promises = Array.from(activeSymbols).map(async sym => {
     const data = await fetchOne(sym, activeRange);
