@@ -388,15 +388,15 @@ function renderChart(bonds) {
     data: {
       datasets: [
         {
-          label: 'SA with Outlier Factor (SAO)',
-          data: saoData,
-          borderColor: '#1a56db', // Bold Blue
-          backgroundColor: '#1a56db',
-          borderWidth: 2.2,
-          pointRadius: 2.5, // Even smaller
-          pointStyle: 'circle',
+          label: 'Ask',
+          data: askData,
+          borderColor: '#94a3b8', // Medium Gray
+          backgroundColor: '#94a3b8',
+          borderWidth: 1.5,
+          pointRadius: 3.5, 
+          pointStyle: 'rect', // Square
           tension: 0.1,
-          order: 1
+          order: 3 // Drawn at the bottom
         },
         {
           label: 'Seasonally Adjusted (SA)',
@@ -407,18 +407,18 @@ function renderChart(bonds) {
           pointRadius: 4, 
           pointStyle: 'crossRot', // X shape
           tension: 0.1,
-          order: 2
+          order: 2 // Drawn in the middle
         },
         {
-          label: 'Ask',
-          data: askData,
-          borderColor: '#94a3b8', // Medium Gray
-          backgroundColor: '#94a3b8',
-          borderWidth: 1.5,
-          pointRadius: 3.5, 
-          pointStyle: 'rect', // Square
+          label: 'SA with Outlier Factor (SAO)',
+          data: saoData,
+          borderColor: '#1a56db', // Bold Blue
+          backgroundColor: '#1a56db',
+          borderWidth: 2.2,
+          pointRadius: 2.5, // Even smaller
+          pointStyle: 'circle',
           tension: 0.1,
-          order: 3
+          order: 1 // Drawn on top
         }
       ]
     },
