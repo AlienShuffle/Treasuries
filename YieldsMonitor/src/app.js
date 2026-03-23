@@ -436,27 +436,36 @@ function updateDynamicTicks(chart, data) {
     const days = [...new Set(data.map(p => p.x.toDateString()))].map(d => new Date(d));
     
     days.forEach((day, idx) => {
+      const dayData = data.filter(p => p.x.toDateString() === day.toDateString());
+      if (dayData.length === 0) return;
+      
+      const dayMin = dayData[0].x;
+      const dayMax = dayData[dayData.length-1].x;
+      
       const am8 = new Date(day); am8.setHours(8, 0, 0, 0);
       const pm5 = new Date(day); pm5.setHours(17, 0, 0, 0);
 
-      annotations[`am8-${idx}`] = {
-        type: 'line',
-        xMin: am8,
-        xMax: am8,
-        borderColor: 'rgba(15, 23, 42, 0.8)', // Much darker Slate-900
-        borderWidth: 1.5,
-        borderDash: [4, 4],
-        label: { display: false }
-      };
-      annotations[`pm5-${idx}`] = {
-        type: 'line',
-        xMin: pm5,
-        xMax: pm5,
-        borderColor: 'rgba(15, 23, 42, 0.8)', // Much darker Slate-900
-        borderWidth: 1.5,
-        borderDash: [4, 4],
-        label: { display: false }
-      };
+      // Only add annotation if it's within the range of data we have for this day
+      // (or if it's today and we're during market hours)
+      if (am8 >= dayMin && am8 <= dayMax) {
+        annotations[`am8-${idx}`] = {
+          type: 'line',
+          xMin: am8, xMax: am8,
+          borderColor: 'rgba(15, 23, 42, 0.4)', // Slightly softer
+          borderWidth: 1.5, borderDash: [4, 4],
+          label: { display: false }
+        };
+      }
+      
+      if (pm5 >= dayMin && pm5 <= dayMax) {
+        annotations[`pm5-${idx}`] = {
+          type: 'line',
+          xMin: pm5, xMax: pm5,
+          borderColor: 'rgba(15, 23, 42, 0.4)', // Slightly softer
+          borderWidth: 1.5, borderDash: [4, 4],
+          label: { display: false }
+        };
+      }
     });
     chart.options.plugins.annotation.annotations = annotations;
   } else {
