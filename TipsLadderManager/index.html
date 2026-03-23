@@ -196,7 +196,10 @@
     <div class="fields">
       <div class="field" id="field-holdings">
         <label>Holdings CSV</label>
-        <input type="file" id="holdings-file" accept=".csv">
+        <div style="display:flex;align-items:center;gap:8px">
+          <input type="file" id="holdings-file" accept=".csv">
+          <span id="holdings-filename" style="font-size:11px;color:#64748b;font-style:italic"></span>
+        </div>
       </div>
       <div class="field">
         <label>DARA ($)</label>
@@ -654,6 +657,10 @@ function updateRebalLastYearDropdown() {
 let currentHoldingsArray = null;
 
 document.getElementById('holdings-file').addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  const nameSpan = document.getElementById('holdings-filename');
+  if (nameSpan) nameSpan.textContent = file ? file.name : '';
+
   currentHoldingsArray = null;
   setStatus('');
   _clearAutoDara();
