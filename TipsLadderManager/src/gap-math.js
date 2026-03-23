@@ -7,9 +7,10 @@ import { calculateMDuration } from '../../shared/src/bond-math.js';
 // ─── Yield interpolation ──────────────────────────────────────────────────────
 // Spec: 4.0 Phase 2, 3.0 Synthetic TIPS Construction
 export function interpolateYield(anchorBefore, anchorAfter, targetDate) {
-  return anchorBefore.yield +
-    (targetDate - anchorBefore.maturity) * (anchorAfter.yield - anchorBefore.yield) /
-    (anchorAfter.maturity - anchorBefore.maturity);
+  if (!anchorBefore || !anchorAfter || !targetDate) return NaN;
+  const y1 = parseFloat(anchorBefore.yield);
+  const y2 = parseFloat(anchorAfter.yield);
+  return y1 + (targetDate - anchorBefore.maturity) * (y2 - y1) / (anchorAfter.maturity - anchorBefore.maturity);
 }
 
 // ─── Synthetic coupon ─────────────────────────────────────────────────────────

@@ -42,8 +42,8 @@ function lookupRefCpi(refCpiRows, dateStr) {
 }
 
 // ── Load shared data ──────────────────────────────────────────────────────────
-const yieldsPath = path.resolve('./tests/e2e/TipsYields.csv');
-const refCpiPath = path.resolve('./tests/e2e/RefCPI.csv');
+const yieldsPath = path.resolve('TipsLadderManager/tests/e2e/TipsYields.csv');
+const refCpiPath = path.resolve('TipsLadderManager/tests/e2e/RefCPI.csv');
 
 console.log(`[Test Setup] Market Data:   ${yieldsPath}`);
 const yieldsRows = parseCsv(readFileSync(yieldsPath, 'utf8')).map(r => ({
