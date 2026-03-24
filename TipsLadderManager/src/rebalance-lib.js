@@ -201,10 +201,10 @@ function calculateGapParameters(gapYears, settlementDate, refCPI, tipsMap, DARA,
     const year  = bond.maturity.getFullYear();
     const month = bond.maturity.getMonth() + 1;
     if (year === minGapYear - 1 && month === 1) {
-      anchorBefore = { maturity: bond.maturity, yield: bond.yield, baseCpi: bond.baseCpi };
+      anchorBefore = { maturity: bond.maturity, yield: bond.yield };
     }
     if (year > maxGapYear && month === 2 && year < anchorAfterYear) {
-      anchorAfter = { maturity: bond.maturity, yield: bond.yield, baseCpi: bond.baseCpi };
+      anchorAfter = { maturity: bond.maturity, yield: bond.yield };
       anchorAfterYear = year;
     }
   }
@@ -227,12 +227,7 @@ function calculateGapParameters(gapYears, settlementDate, refCPI, tipsMap, DARA,
       if (parseInt(futYear) > year) sumLaterMaturityInterest += gapLaterMaturityInterest[futYear];
     }
 
-    // Interpolate Index Ratio for synthetic TIPS based on RefCPI/BaseCPI of anchors
-    const irBefore = refCPI / (anchorBefore.baseCpi || refCPI);
-    const irAfter  = refCPI / (anchorAfter.baseCpi || refCPI);
-    const syntheticIR = irBefore + (syntheticMat - anchorBefore.maturity) * (irAfter - irBefore) / (anchorAfter.maturity - anchorBefore.maturity);
-
-    const piPerBond = 1000 * syntheticIR + 1000 * syntheticIR * synCpn * 0.5;
+    const piPerBond = 1000 + 1000 * synCpn * 0.5;
     const qty = Math.round((DARA - sumLaterMaturityInterest) / piPerBond);
     
     // Gap total cost is the sum of market costs of all gap years.
@@ -536,7 +531,7 @@ export function runRebalance({ dara, method, bracketMode = '2bracket', holdings:
         for (const h of nonTarget) ntPI += h.qty * piMap[h.cusip];
         tFundedYearQty = Math.max(0, Math.round((needed - ntPI) / piMap[targetCUSIP]));
       }
-      postQ = isBracket ? tFundedYearQty + Math.max(0, Math.round((bracketExcessTargetCost[year] || 0) / costPerBondReal)) : tFundedYearQty;
+      postQ = isBracket ? tFundedYearQty + Math.max(0, Math.round((bracketExcessTargetCost[year] || 0) / costPerBond)) : tFundedYearQty;
       buySellTargets[year] = { targetCUSIP, targetFundedYearQty: tFundedYearQty, targetQty: postQ, postRebalQty: postQ, qtyDelta: postQ - targetCurrentQty, targetCost: tFundedYearQty * costPerBond, costDelta: -((postQ - targetCurrentQty) * costPerBond), costPerBond, isBracket };
     } else if (year > lastYear && year <= derivedLastYear && yi.holdings.length > 0) {
       // Year was contiguous with original ladder but is now above lastYearOverride — sell all
