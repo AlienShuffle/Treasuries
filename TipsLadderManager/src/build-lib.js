@@ -18,7 +18,6 @@ function calcGapParams(gapYears, tipsMap, settlementDate, refCPI, dara, prelim) 
     if (!bond.maturity || !bond.yield) continue;
     const yr = bond.maturity.getFullYear(), mo = bond.maturity.getMonth() + 1;
     if (yr === minGapYear - 1 && mo === 1) anchorBefore = bond;
-    // anchorAfter: nearest Feb bond after the gap (handles lastYear < 2039 where maxGapYear+1 is still a gap year)
     if (yr > maxGapYear && mo === 2) {
       if (!anchorAfter || bond.maturity < anchorAfter.maturity) anchorAfter = bond;
     }
@@ -26,28 +25,28 @@ function calcGapParams(gapYears, tipsMap, settlementDate, refCPI, dara, prelim) 
   if (!anchorBefore || !anchorAfter)
     throw new Error('Could not find yield interpolation anchors for gap years');
 
-  let totalDuration = 0, totalCost = 0;
+  let totalDuration = 0, totalCost = 0, count = 0;
   const breakdown = [];
-  for (const year of [...gapYears].sort((a, b) => b - a)) {
+  for (const year of [...gapYears]) {
     const synMat = new Date(year, 1, 15); // Feb 15
     const synYld = interpolateYield(anchorBefore, anchorAfter, synMat);
     const synCpn = _synCoupon(synYld);
 
     totalDuration += calculateMDuration(settlementDate, synMat, synCpn, synYld);
 
-    // Sum annual interest from all non-gap bonds with maturity year > this gap year
     let laterMatInt = 0;
     for (const [y, p] of Object.entries(prelim)) {
       if (parseInt(y) > year) laterMatInt += p.annualInterestReal;
     }
 
     const piPerBond = 1000 + 1000 * synCpn * 0.5;
-    const qty = _fyQty(dara, laterMatInt, piPerBond);
+    const qty = Math.round((dara - laterMatInt) / (piPerBond / 1000));
     totalCost += qty * 1000;
     breakdown.push({ year, qty, piPerBond, laterMatInt });
+    count++;
   }
 
-  return { avgDuration: totalDuration / gapYears.length, totalCost, breakdown };
+  return { avgDuration: totalDuration / count, totalCost, breakdown };
 }
 
 // ─── Main entry point ──────────────────────────────────────────────────────────
@@ -112,10 +111,10 @@ export function runBuild({ dara, firstYear: firstYearOpt, lastYear, tipsMap, ref
   let laterMatInt = 0;
   for (const year of [...rangeYears].sort((a, b) => b - a)) {
     const bond = yearBondMap[year];
-    const pi   = bondCalcs(bond, refCPI).piPerBond;
+    const { indexRatio: ir, piPerBond: pi } = bondCalcs(bond, refCPI);
     const qty  = _fyQty(daraByYear?.get(year) ?? dara, laterMatInt, pi);
-    // Real interest = qty * 1000 * coupon (consistent with DARA)
-    const annReal = qty * 1000 * (bond.coupon ?? 0);
+    // Real interest = qty * (1000 * IR) * coupon
+    const annReal = qty * (1000 * ir) * (bond.coupon ?? 0);
     prelim[year] = { targetFundedYearQty: qty, annualInterestReal: annReal, laterMatInt, pi };
     laterMatInt += annReal;
   }
