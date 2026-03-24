@@ -498,7 +498,7 @@ export function buildDurationPopupRows(summary, mode) {
     );
 
     const gapRows = [];
-    if (summary.gapParams.breakdown) {
+    if (summary.gapParams?.breakdown) {
       summary.gapParams.breakdown.forEach(g => {
         gapRows.push({ label: g.year + ' cost', note: 'round(' + Math.round(summary.DARA) + ' \u2212 ' + Math.round(g.laterMatInt) + ') \u00f7 ' + g.piPerBond.toFixed(2) + ' \u00d7 1,000', value: '$' + (g.qty * 1000).toLocaleString() });
       });
@@ -508,7 +508,7 @@ export function buildDurationPopupRows(summary, mode) {
       { sep: true },
       { heading: 'New Ladder Coverage' },
       ...gapRows,
-      { label: 'Future gap cost (Total)', note: 'Sum of individual gap costs', value: '$' + Math.round(summary.gapParams.totalCost).toLocaleString(), total: true },
+      { label: 'Future gap cost (Total)', note: 'Sum of individual gap costs', value: '$' + Math.round(summary.gapParams?.totalCost ?? 0).toLocaleString(), total: true },
       { label: 'Total excess cost', note: 'real cost of excess bonds now held in brackets', value: '$' + Math.round(summary.totalExcessCostReal || summary.totalExcessCost).toLocaleString() },
       { label: 'Coverage status',   note: 'Gap is fully funded by the new bracket excess', value: 'Fully Funded', total: true }
     );
