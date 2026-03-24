@@ -237,7 +237,14 @@ function createChartInstance(sym) {
         pointRadius: 0,
         pointHoverRadius: 4,
         fill: false,
-        tension: 0.1
+        tension: 0.1,
+        segment: {
+          borderColor: ctx => {
+            if (activeRange !== '2D' && activeRange !== '10D') return color;
+            const mid = (ctx.p0.parsed.x + ctx.p1.parsed.x) / 2;
+            return isAfterHoursEt(mid) ? color + '55' : color;
+          }
+        }
       }]
     },
     options: {
@@ -249,7 +256,24 @@ function createChartInstance(sym) {
           type: 'time',
           time: { tooltipFormat: 'MM/dd/yy HH:mm:ss', displayFormats: { hour: 'MM/dd HH:mm', day: 'MMM dd' } },
           grid: { color: '#f1f5f9' },
-          ticks: { autoSkip: true, font: { size: 9, weight: 'bold' }, color: '#000' }
+          ticks: {
+            autoSkip: true, font: { size: 9, weight: 'bold' }, color: '#000',
+            callback: function(value, index, ticks) {
+              const ts = ticks[index]?.value ?? value;
+              if (typeof ts !== 'number') return value;
+              const date = new Date(ts);
+              const isIntraday = activeRange === '2D' || activeRange === '10D';
+              if (isIntraday) {
+                return date.toLocaleString('en-US', {
+                  timeZone: 'America/New_York', hourCycle: 'h23',
+                  month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit'
+                });
+              }
+              return date.toLocaleDateString('en-US', {
+                timeZone: 'America/New_York', month: 'short', day: 'numeric'
+              });
+            }
+          }
         },
         y: {
           grid: { color: '#f1f5f9' },
@@ -276,7 +300,18 @@ function createChartInstance(sym) {
           bodyFont: { size: 12, weight: 'bold' },
           cornerRadius: 6,
           displayColors: false,
-          callbacks: { label: ctx => `Yield: ${ctx.parsed.y.toFixed(3)}%` }
+          callbacks: {
+            title: (items) => {
+              if (!items.length) return '';
+              const date = new Date(items[0].parsed.x);
+              return date.toLocaleString('en-US', {
+                timeZone: 'America/New_York', hourCycle: 'h23',
+                month: '2-digit', day: '2-digit', year: '2-digit',
+                hour: '2-digit', minute: '2-digit', second: '2-digit'
+              }) + ' ET';
+            },
+            label: ctx => `Yield: ${ctx.parsed.y.toFixed(3)}%`
+          }
         }
       }
     }
@@ -339,6 +374,43 @@ function parseSourceTime(tt) {
     d = new Date(d.getTime() + diff);
   }
   return d;
+}
+
+function getEtDateStr(date) {
+  // Returns "MM/DD/YYYY" for the ET wall-clock date of the given UTC instant.
+  return date.toLocaleDateString('en-US', {
+    timeZone: 'America/New_York',
+    year: 'numeric', month: '2-digit', day: '2-digit'
+  });
+}
+
+function makeEtMoment(year, month0, day, hour) {
+  // Returns a Date (UTC instant) that represents `hour:00:00 ET` on the given ET calendar date.
+  // Same iterative convergence approach as parseSourceTime.
+  const fmt = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York', hourCycle: 'h23',
+    year: 'numeric', month: 'numeric', day: 'numeric',
+    hour: 'numeric', minute: 'numeric', second: 'numeric'
+  });
+  let d = new Date(Date.UTC(year, month0, day, hour, 0, 0));
+  for (let i = 0; i < 2; i++) {
+    const p = fmt.formatToParts(d).reduce((a, pt) => ({ ...a, [pt.type]: pt.value }), {});
+    const diff = Date.UTC(year, month0, day, hour, 0, 0) -
+      Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour, +p.minute, +p.second);
+    if (diff === 0) break;
+    d = new Date(d.getTime() + diff);
+  }
+  return d;
+}
+
+function isAfterHoursEt(tsMs) {
+  // Returns true if the UTC instant falls outside 8:00–17:00 ET wall-clock time.
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York', hourCycle: 'h23',
+    hour: 'numeric', minute: 'numeric'
+  }).formatToParts(new Date(tsMs)).reduce((a, p) => ({ ...a, [p.type]: +p.value }), {});
+  const mins = parts.hour * 60 + parts.minute;
+  return mins < 8 * 60 || mins >= 17 * 60;
 }
 
 async function fetchWithTimeout(url, options = {}, timeout = 8000) {
@@ -457,22 +529,37 @@ function updateDynamicTicks(chart, data) {
   chart.options.scales.y.min = min - padding;
   chart.options.scales.y.max = max + padding;
 
-  // Add 8am/5pm annotations if intraday
+  // Add 8am/5pm ET annotations if intraday
   if (activeRange === '2D' || activeRange === '10D') {
     const annotations = {};
-    const days = [...new Set(data.map(p => p.x.toDateString()))].map(d => new Date(d));
-    
-    days.forEach((day, idx) => {
-      const dayData = data.filter(p => p.x.toDateString() === day.toDateString());
-      if (dayData.length === 0) return;
-      
-      const dayMin = dayData[0].x;
-      const dayMax = dayData[dayData.length-1].x;
-      
-      const am8 = new Date(day); am8.setHours(8, 0, 0, 0);
-      const pm5 = new Date(day); pm5.setHours(17, 0, 0, 0);
+    const etDateStrs = [...new Set(data.map(p => getEtDateStr(p.x)))];
 
-      // Only add annotation if it's within the range of data we have for this day
+    etDateStrs.forEach((etDateStr, idx) => {
+      const dayData = data.filter(p => getEtDateStr(p.x) === etDateStr);
+      if (dayData.length === 0) return;
+
+      const dayMin = dayData[0].x;
+      const dayMax = dayData[dayData.length - 1].x;
+
+      // Parse "MM/DD/YYYY" → ET calendar parts, then build exact ET UTC instants
+      const [m, d, y] = etDateStr.split('/').map(Number);
+      const midnight = makeEtMoment(y, m - 1, d, 0);
+      const am8 = makeEtMoment(y, m - 1, d, 8);
+      const pm5 = makeEtMoment(y, m - 1, d, 17);
+      const nextMidnight = makeEtMoment(y, m - 1, d + 1, 0); // JS Date handles month/year rollover
+
+      // After-hours background shading (pre-market and post-market)
+      const AH_BG = 'rgba(148, 163, 184, 0.13)';
+      annotations[`pre-bg-${idx}`] = {
+        type: 'box', xMin: midnight, xMax: am8,
+        backgroundColor: AH_BG, borderWidth: 0, drawTime: 'beforeDatasetsDraw'
+      };
+      annotations[`aft-bg-${idx}`] = {
+        type: 'box', xMin: pm5, xMax: nextMidnight,
+        backgroundColor: AH_BG, borderWidth: 0, drawTime: 'beforeDatasetsDraw'
+      };
+
+      // Vertical open/close lines — only if they fall within data we have for this day
       // (or if it's today and we're during market hours)
       if (am8 >= dayMin && am8 <= dayMax) {
         annotations[`am8-${idx}`] = {
