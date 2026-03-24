@@ -27,6 +27,7 @@ function calcGapParams(gapYears, tipsMap, settlementDate, refCPI, dara, prelim) 
     throw new Error('Could not find yield interpolation anchors for gap years');
 
   let totalDuration = 0, totalCost = 0;
+  const breakdown = [];
   for (const year of [...gapYears].sort((a, b) => b - a)) {
     const synMat = new Date(year, 1, 15); // Feb 15
     const synYld = interpolateYield(anchorBefore, anchorAfter, synMat);
@@ -41,10 +42,12 @@ function calcGapParams(gapYears, tipsMap, settlementDate, refCPI, dara, prelim) 
     }
 
     const piPerBond = 1000 + 1000 * synCpn * 0.5;
-    totalCost += _fyQty(dara, laterMatInt, piPerBond) * 1000;
+    const qty = _fyQty(dara, laterMatInt, piPerBond);
+    totalCost += qty * 1000;
+    breakdown.push({ year, qty, piPerBond, laterMatInt });
   }
 
-  return { avgDuration: totalDuration / gapYears.length, totalCost };
+  return { avgDuration: totalDuration / gapYears.length, totalCost, breakdown };
 }
 
 // ─── Main entry point ──────────────────────────────────────────────────────────

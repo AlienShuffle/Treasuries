@@ -435,11 +435,11 @@ export function buildDurationPopupRows(summary, mode) {
 
   if (is3) {
     const { newLowerYear, newLowerDuration, origLowerWeight, newLowerWeight3 } = summary;
-    const w1 = (origLowerWeight ?? 0), w2 = (newLowerWeight3 ?? 0), w3 = upperWeight ?? 0;
+    const w1 = (origLowerWeight ?? 0), w2 = (newLowerWeight3 ?? 0), w3 = (summary.upperWeight3 ?? summary.upperWeight ?? 0);
     const fellBack = !!summary.bracketFellBack3to2;
-    const match = w1.toFixed(4) + ' × ' + lowerDuration.toFixed(2)
-                + ' + ' + w2.toFixed(4) + ' × ' + newLowerDuration.toFixed(2)
-                + ' + ' + w3.toFixed(4) + ' × ' + upperDuration.toFixed(2)
+    const match = w1.toFixed(4) + ' \u00d7 ' + lowerDuration.toFixed(2)
+                + ' + ' + w2.toFixed(4) + ' \u00d7 ' + newLowerDuration.toFixed(2)
+                + ' + ' + w3.toFixed(4) + ' \u00d7 ' + upperDuration.toFixed(2)
                 + ' = ' + gapParams.avgDuration.toFixed(2);
     rows = [
       { label: 'Gap avg duration', value: gapParams.avgDuration.toFixed(2) + ' yr' },
