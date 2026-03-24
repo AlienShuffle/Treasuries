@@ -233,10 +233,12 @@ function calculateGapParameters(gapYears, settlementDate, refCPI, tipsMap, DARA,
     // Gap total cost is the sum of market costs of all gap years.
     // For synthetic TIPS, price is 100 since we're interpolating yields.
     totalCost += qty * 1000; 
+    if (!gapParams.breakdown) gapParams.breakdown = [];
+    gapParams.breakdown.push({ year, qty, piPerBond, laterMatInt: sumLaterMaturityInterest });
     count++;
   }
 
-  return { avgDuration: totalDuration / count, totalCost };
+  return { avgDuration: totalDuration / count, totalCost, breakdown: gapParams.breakdown };
 }
 
 export function inferDARAFromCash({ bracketMode = '2bracket', holdings: holdingsRaw, tipsMap, refCPI, settlementDate, lastYearOverride = null }) {

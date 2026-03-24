@@ -74,7 +74,7 @@ export const COLS = [
     value:    d => d.fundedYearQtyAfter,
     subValue: d => d.excessQtyAfter,
     total: true, totalFn: d => d.qtyAfter || 0,
-    drill: true, drillCond: v => typeof v === 'number' && v > 0 },
+    drill: true, drillCond: (_v, d) => (d.qtyAfter || 0) > 0 },
 
   { label: 'Quantity Delta',     headerHTML: 'Quantity<br>Delta', key: 'qtyDelta',   fmt: 'sgn', rebalOnly: true,
     value:    d => d.fundedYearQtyAfter - d.fundedYearQtyBefore,

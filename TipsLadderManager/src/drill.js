@@ -43,6 +43,19 @@ function bondVarRows(d, nPeriods, principalPerBond, couponPct) {
     + row('Coupon periods in FY', '', nPerLbl, false, undefined, 'cp');
 }
 
+function gapBreakdownRows(gapParams, dara) {
+  if (!gapParams?.breakdown) return '';
+  let rows = '';
+  gapParams.breakdown.forEach((g, i) => {
+    const id = 'gap' + i;
+    const fmla = '(DARA \u2212 <span class="formula-var" data-source="' + id + 'lmi">LMI</span>) \u00f7 <span class="formula-var" data-source="' + id + 'pi">P+I</span>';
+    rows += row(g.year + ' quantity', fmla, g.qty, false, undefined, id + 'qty')
+          + row('\u21b3 P+I per synthetic', '', fm2(g.piPerBond), false, undefined, id + 'pi')
+          + row('\u21b3 Later mat int (LMI)', '', fm(g.laterMatInt), false, undefined, id + 'lmi');
+  });
+  return rows;
+}
+
 export function buildDrillHTML(d, colKey, summary) {
   const nPeriods         = d.nPeriods != null ? d.nPeriods : (d.halfOrFull === 0.5 ? 1 : 2);
   const principalPerBond = d.principalPerBond != null ? d.principalPerBond : 1000 * d.indexRatio;
@@ -95,11 +108,12 @@ export function buildDrillHTML(d, colKey, summary) {
       const exCost  = s.gapParams.totalCost * weight;
       rows = row('Bracket weights', 'see Duration Calcs \u2197', fd(weight, 4))
         + sep()
-        + row('Gap year total cost', '', fm(s.gapParams.totalCost))
-        + row('Target excess cost', '<span class="formula-var" data-source="total">total cost</span> \xd7 ' + wLabel.toLowerCase(), fm(exCost))
+        + gapBreakdownRows(s.gapParams, s.DARA)
+        + row('Gap total cost (Real)', 'sum(gap year qty) \xd7 1,000', fm(s.gapParams.totalCost), true, undefined, 'gtc')
+        + row('Target excess cost', '<span class="formula-var" data-source="gtc">total cost</span> \xd7 ' + wLabel.toLowerCase(), fm(exCost), false, undefined, 'tec')
         + sep()
         + row('Cost per TIPS', '<span class="formula-var" data-source="price">price/100</span> \xd7 <span class="formula-var" data-source="ir">index ratio</span> \xd7 1,000', fm2(d.costPerBond), false, undefined, 'cpb')
-        + row('Excess Quantity', 'round(target cost \xf7 <span class="formula-var" data-source="cpb">Cost per TIPS</span>)', d.excessQty);
+        + row('Excess Quantity', 'round(<span class="formula-var" data-source="tec">target cost</span> \xf7 <span class="formula-var" data-source="cpb">Cost per TIPS</span>)', d.excessQty);
       if (isAmt) {
         rows += sep()
           + bondVarRows(d, nPeriods, principalPerBond, couponPct)
@@ -158,7 +172,8 @@ export function buildDrillHTML(d, colKey, summary) {
       const piPerBond = principalPerBond * (1 + d.coupon / 2 * nPeriods);
 
       rows += sep()
-        + row('Gap total cost (Real)', 'Total face value needed for gap rungs', fm(summary.gapParams?.totalCost ?? 0), false, undefined, 'gtc')
+        + gapBreakdownRows(summary.gapParams, summary.DARA)
+        + row('Gap total cost (Real)', 'sum(gap year qty) \xd7 1,000', fm(summary.gapParams?.totalCost ?? 0), true, undefined, 'gtc')
         + row('Bracket weight', 'from <a class="info-link" data-popup="duration" style="border-bottom:1px dotted #94a3b8;color:inherit;text-decoration:none;">Duration Calcs</a>', (weight ?? 0).toFixed(4), false, undefined, 'bw')
         + row('Target excess cost', '<span class="formula-var" data-source="gtc">Gap total cost</span> \xd7 <span class="formula-var" data-source="bw">Bracket weight</span>', fm(targetExCost), false, undefined, 'tec')
         + row('Cost per TIPS (Nominal)', 'price/100 \xd7 index ratio \xd7 1,000', fm2(d.costPerBond), false, undefined, 'cpbn')
@@ -482,11 +497,19 @@ export function buildDurationPopupRows(summary, mode) {
         value: surplusVal, total: true }
     );
 
+    const gapRows = [];
+    if (summary.gapParams.breakdown) {
+      summary.gapParams.breakdown.forEach(g => {
+        gapRows.push({ label: g.year + ' cost', note: 'round(' + Math.round(summary.DARA) + ' \u2212 ' + Math.round(g.laterMatInt) + ') \u00f7 ' + g.piPerBond.toFixed(2) + ' \u00d7 1,000', value: '$' + (g.qty * 1000).toLocaleString() });
+      });
+    }
+
     rows.push(
       { sep: true },
       { heading: 'New Ladder Coverage' },
+      ...gapRows,
+      { label: 'Future gap cost (Total)', note: 'Sum of individual gap costs', value: '$' + Math.round(summary.gapParams.totalCost).toLocaleString(), total: true },
       { label: 'Total excess cost', note: 'real cost of excess bonds now held in brackets', value: '$' + Math.round(summary.totalExcessCostReal || summary.totalExcessCost).toLocaleString() },
-      { label: 'Future gap cost',   note: 'theoretical cost to cover remaining gaps', value: '$' + Math.round(summary.gapParams.totalCost).toLocaleString() },
       { label: 'Coverage status',   note: 'Gap is fully funded by the new bracket excess', value: 'Fully Funded', total: true }
     );
   }
