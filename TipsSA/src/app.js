@@ -494,7 +494,11 @@ function renderChart(bonds) {
       },
       plugins: {
         legend: {
-          labels: { usePointStyle: true, boxWidth: 8, padding: 15, font: { size: 12, weight: '500' } }
+          labels: { usePointStyle: true, boxWidth: 8, padding: 15, font: { size: 12, weight: '500' } },
+          onClick: (e, legendItem, legend) => {
+            Chart.defaults.plugins.legend.onClick(e, legendItem, legend);
+            rescaleToVisible(legend.chart);
+          }
         },
         zoom: {
           pan: { enabled: true, mode: 'xy', onPanComplete: ({chart}) => updateDynamicTicks(chart) },
@@ -526,25 +530,20 @@ function renderChart(bonds) {
   document.getElementById('resetZoom').onclick = () => {
     chart.options.scales.x.min = minX;
     chart.options.scales.x.max = maxX;
-    chart.options.scales.y.min = minY;
-    chart.options.scales.y.max = maxY;
-    chart.options.scales.y.ticks.stepSize = 0.25;
-    chart.update();
+    chart.update('none');
+    rescaleToVisible(chart);
   };
 }
 
-function updateDynamicTicks(chart) {
-  const xAx = chart.scales.x;
+function rescaleToVisible(chart) {
   let visibleMinY = Infinity;
   let visibleMaxY = -Infinity;
 
-  chart.data.datasets.forEach((dataset, datasetIndex) => {
-    if (!chart.isDatasetVisible(datasetIndex)) return;
+  chart.data.datasets.forEach((dataset, i) => {
+    if (!chart.isDatasetVisible(i)) return;
     dataset.data.forEach(p => {
-      if (p.x >= xAx.min && p.x <= xAx.max) {
-        if (p.y < visibleMinY) visibleMinY = p.y;
-        if (p.y > visibleMaxY) visibleMaxY = p.y;
-      }
+      if (p.y < visibleMinY) visibleMinY = p.y;
+      if (p.y > visibleMaxY) visibleMaxY = p.y;
     });
   });
 
@@ -552,15 +551,26 @@ function updateDynamicTicks(chart) {
 
   const range = visibleMaxY - visibleMinY;
   let newStep = 0.25;
-  if (range > 3) newStep = 0.50;  
-  if (range > 7) newStep = 1.00;  
-  if (range < 0.6) newStep = 0.05; 
+  if (range > 3) newStep = 0.50;
+  if (range > 7) newStep = 1.00;
+  if (range < 0.6) newStep = 0.05;
 
-  const snappedMin = Math.floor((visibleMinY - 0.01) / newStep) * newStep;
-  const snappedMax = Math.ceil((visibleMaxY + 0.01) / newStep) * newStep;
+  chart.options.scales.y.min = Math.floor((visibleMinY - 0.01) / newStep) * newStep;
+  chart.options.scales.y.max = Math.ceil((visibleMaxY + 0.01) / newStep) * newStep;
+  chart.options.scales.y.ticks.stepSize = newStep;
+  chart.update('none');
+}
 
-  chart.options.scales.y.min = snappedMin;
-  chart.options.scales.y.max = snappedMax;
+function updateDynamicTicks(chart) {
+  const yMin = chart.scales.y.min;
+  const yMax = chart.scales.y.max;
+  const range = yMax - yMin;
+
+  let newStep = 0.25;
+  if (range > 3) newStep = 0.50;
+  if (range > 7) newStep = 1.00;
+  if (range < 0.6) newStep = 0.05;
+
   chart.options.scales.y.ticks.stepSize = newStep;
   chart.update('none');
 }
