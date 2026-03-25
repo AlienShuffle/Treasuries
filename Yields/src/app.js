@@ -8,6 +8,8 @@ const R2_BASE_URL = 'https://pub-ba11062b177640459f72e0a88d0261ae.r2.dev';
 const YIELDS_CSV_URL = `${R2_BASE_URL}/Treasuries/Yields.csv`;
 const REF_CPI_CSV_URL = `${R2_BASE_URL}/Treasuries/RefCpiNsaSa.csv`;
 const HOLIDAYS_CSV_URL = `${R2_BASE_URL}/misc/BondHolidaysSifma.csv`;
+const FIDELITY_TREASURIES_URL = `${R2_BASE_URL}/Treasuries/FidelityTreasuries.csv`;
+const FIDELITY_TIPS_URL = `${R2_BASE_URL}/Treasuries/FidelityTips.csv`;
 
 const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
@@ -17,6 +19,7 @@ let rawNominalsData = null;
 let rawRefCpiData = null;
 let holidaySet = new Set();
 let brokerPrices = null;
+let brokerDownloadDate = null;    // download date string from Fidelity TIPS CSV footer
 let fidelityNominalsData = null;  // processed bond objects from Fidelity CSV
 let fidelityNominalsDate = null;  // download date string extracted from CSV footer
 let nominalsShowStrips = false;
@@ -80,6 +83,13 @@ function toIsoDate(date) {
   return date.getFullYear() + '-' +
     String(date.getMonth() + 1).padStart(2, '0') + '-' +
     String(date.getDate()).padStart(2, '0');
+}
+
+
+// Parse "MM/DD/YYYY HH:MM AM/PM" (Fidelity footer) → Date (date part only)
+function parseFidelityDateStr(s) {
+  const [mo, dy, yr] = (s || '').split(' ')[0].split('/').map(Number);
+  return new Date(yr, mo - 1, dy);
 }
 
 function nextBusinessDay(date, holidaySet) {
@@ -308,10 +318,12 @@ async function init() {
   
   try {
     console.log("Fetching market data...");
-    const [yieldsRes, refCpiRes, holidayRes] = await Promise.all([
+    const [yieldsRes, refCpiRes, holidayRes, fidTreasuriesRes, fidTipsRes] = await Promise.all([
       fetch(YIELDS_CSV_URL).then(r => { console.log("Yields fetched"); return r; }).catch(e => ({ ok: false, error: e })),
       fetch(REF_CPI_CSV_URL).then(r => { console.log("RefCPI fetched"); return r; }).catch(e => ({ ok: false, error: e })),
-      fetch(HOLIDAYS_CSV_URL).then(r => { console.log("Holidays fetched"); return r; }).catch(e => ({ ok: false, error: e }))
+      fetch(HOLIDAYS_CSV_URL).then(r => { console.log("Holidays fetched"); return r; }).catch(e => ({ ok: false, error: e })),
+      fetch(FIDELITY_TREASURIES_URL).then(r => { console.log("Fidelity Treasuries fetched"); return r; }).catch(e => ({ ok: false, error: e })),
+      fetch(FIDELITY_TIPS_URL).then(r => { console.log("Fidelity TIPS fetched"); return r; }).catch(e => ({ ok: false, error: e })),
     ]);
 
     if (!yieldsRes.ok) throw new Error(`Failed to fetch yields: ${yieldsRes.status || yieldsRes.error}`);
@@ -322,7 +334,7 @@ async function init() {
     const [yieldsText, refCpiText, holidayText] = await Promise.all([
       yieldsRes.text(),
       refCpiRes.text(),
-      holidayRes.text()
+      holidayRes.text(),
     ]);
 
     console.log("Parsing CSVs...");
@@ -346,6 +358,54 @@ async function init() {
       if (!isNaN(d.getTime())) holidaySet.add(toIsoDate(d));
     });
     console.log(`Holiday set populated with ${holidaySet.size} dates.`);
+
+    if (fidTreasuriesRes.ok) {
+      const fidText = await fidTreasuriesRes.text();
+      const { bonds, downloadDate } = parseFidelityNominals(fidText);
+      if (bonds.length > 0) {
+        fidelityNominalsData = bonds;
+        fidelityNominalsDate = downloadDate;
+        const chkFid = document.getElementById('chkFidelity');
+        chkFid.disabled = false;
+        chkFid.checked = true;
+        document.getElementById('fidelityDateLabel').textContent = downloadDate ? ` (${downloadDate} ${'ET'})` : '';
+        console.log(`Loaded ${bonds.length} Fidelity Treasuries (${downloadDate})`);
+      }
+    } else {
+      console.warn('Fidelity Treasuries not available on R2');
+    }
+
+    if (fidTipsRes.ok) {
+      const fidTipsText = await fidTipsRes.text();
+      const rows = parseCsv(fidTipsText);
+      const clean = val => (val || '').replace(/^=?["']*/, '').replace(/["']*$/, '').trim();
+      const priceMap = new Map();
+      const seenCusips = new Set();
+      rows.forEach(row => {
+        const n = {};
+        for (const k in row) n[k.toLowerCase().trim()] = row[k];
+        const cusip = clean(n['cusip']);
+        const priceStr = n['price ask'] || n['ask price'] || n['price'] || n['price bid'];
+        if (!cusip || seenCusips.has(cusip)) return;
+        if (!rawYieldsData || !rawYieldsData.some(r => r.cusip === cusip)) return;
+        const price = parseFloat(clean(priceStr || '').replace(/,/g, ''));
+        if (!isNaN(price)) priceMap.set(cusip, price);
+        seenCusips.add(cusip);
+      });
+      if (priceMap.size > 0) {
+        brokerPrices = priceMap;
+        const m = fidTipsText.match(/Date downloaded\s+([\d/]+ [\d:]+ [AP]M)/i);
+        const downloadDate = m ? m[1] : null;
+        brokerDownloadDate = downloadDate;
+        const chkBroker = document.getElementById('chkTipsBroker');
+        chkBroker.disabled = false;
+        chkBroker.checked = true;
+        document.getElementById('tipsBrokerDateLabel').textContent = downloadDate ? ` (${downloadDate} ${'ET'})` : '';
+        console.log(`Loaded ${priceMap.size} Fidelity TIPS prices (${downloadDate})`);
+      }
+    } else {
+      console.warn('Fidelity TIPS not available on R2');
+    }
 
     processAndRender();
 
@@ -549,8 +609,13 @@ function processAndRenderNominals() {
 
     const infoEl = document.getElementById('info-strip');
     const parts = [];
-    if (showFed) parts.push(`FedInvest ${rawNominalsData[0]?.settlementDate} (T)`);
-    if (showFid && fidelityNominalsDate) parts.push(`Fidelity ${fidelityNominalsDate}`);
+    if (showFed) parts.push(`FedInvest settle ${rawNominalsData[0]?.settlementDate} (T)`);
+    if (showFid && fidelityNominalsDate) {
+      const loadDate = parseFidelityDateStr(fidelityNominalsDate);
+      const t1 = nextBusinessDay(loadDate, holidaySet);
+      const [datePart] = fidelityNominalsDate.split(' ');
+      parts.push(`Fidelity loaded ${datePart} · settle ${toIsoDate(t1)} (T+1)`);
+    }
     infoEl.textContent = parts.join(' \xb7 ');
     statusEl.textContent = `Loaded ${(fedFiltered?.length || 0) + (fidFiltered?.length || 0)} securities.`;
     statusEl.className = '';
@@ -579,14 +644,13 @@ function renderNominalsTable(fedBonds, fidBonds) {
       <th data-sort="coupon"${sortCls('coupon')}>Coupon</th>
       <th>Price (Fed/Fid)</th>
       <th>Yield (Fed/Fid)</th>
-      <th>Diff (bps)</th>`;
+`;
     const fedMap = new Map(fedBonds.map(b => [b.cusip, b]));
     const fidMap = new Map(fidBonds.map(b => [b.cusip, b]));
     const getV = b => nominalsSort.col === 'cusip' ? b.cusip : nominalsSort.col === 'coupon' ? b.coupon : b.maturityDate;
     const merged = [...new Set([...fedMap.keys(), ...fidMap.keys()])].map(cusip => {
       const fed = fedMap.get(cusip), fid = fidMap.get(cusip), ref = fed || fid;
-      const diff = (fed && fid) ? Math.round((fid.yield - fed.yield) * 10000) : null;
-      return { ...ref, fedPrice: fed?.price ?? NaN, fidPrice: fid?.price ?? NaN, fedYield: fed?.yield ?? null, fidYield: fid?.yield ?? null, diff };
+      return { ...ref, fedPrice: fed?.price ?? NaN, fidPrice: fid?.price ?? NaN, fedYield: fed?.yield ?? null, fidYield: fid?.yield ?? null };
     }).sort(makeCmp(getV));
     tbody.innerHTML = merged.map(b => `
       <tr>
@@ -596,7 +660,6 @@ function renderNominalsTable(fedBonds, fidBonds) {
         <td>${((b.coupon || 0) * 100).toFixed(3)}%</td>
         <td>${isNaN(b.fedPrice) ? '—' : b.fedPrice.toFixed(3)} / ${isNaN(b.fidPrice) ? '—' : b.fidPrice.toFixed(3)}</td>
         <td>${fmtYld(b.fedYield)} / ${fmtYld(b.fidYield)}</td>
-        <td class="${b.diff !== null ? (b.diff > 0 ? 'pos' : b.diff < 0 ? 'neg' : '') : ''}">${b.diff !== null ? (b.diff > 0 ? '+' : '') + b.diff : '—'}</td>
       </tr>`).join('');
   } else {
     const bonds = fedBonds || fidBonds;
@@ -814,11 +877,12 @@ function processAndRenderTips() {
     renderChart(fedFiltered, brokerFiltered);
 
     const parts = [];
-    if (showFed) parts.push(`FedInvest ${fedSettleStr} (T)`);
+    if (showFed) parts.push(`FedInvest settle ${fedSettleStr} (T)`);
     if (showBroker) {
-      const fedSettleDate = localDate(fedSettleStr);
-      const tPlus1 = nextBusinessDay(fedSettleDate, holidaySet);
-      parts.push(`Broker ${toIsoDate(tPlus1)} (T+1)`);
+      const loadDate = brokerDownloadDate ? parseFidelityDateStr(brokerDownloadDate) : localDate(fedSettleStr);
+      const t1 = nextBusinessDay(loadDate, holidaySet);
+      const datePart = brokerDownloadDate ? brokerDownloadDate.split(' ')[0] : fedSettleStr;
+      parts.push(`Fidelity loaded ${datePart} · settle ${toIsoDate(t1)} (T+1)`);
     }
     infoEl.textContent = parts.join(' \xb7 ');
     statusEl.textContent = `Loaded ${(fedFiltered?.length || 0) + (brokerFiltered?.length || 0)} TIPS.`;
@@ -913,7 +977,7 @@ function renderChart(fedBonds, brokerBonds) {
     );
   }
   if (brokerBonds) {
-    const sfx = both ? ' (Broker)' : '';
+    const sfx = both ? ' (Fidelity)' : '';
     seriesDef.push(
       { label: `Ask${sfx}`, data: brokerBonds.map(b => toPt(b, 'askYield')), color: '#f97316', style: 'rect', w: 1.5, r: 3.5 },
       { label: `SA${sfx}`,  data: brokerBonds.map(b => toPt(b, 'saYield')),  color: '#dc2626', style: 'crossRot', w: 1.8, r: 4 },
@@ -1077,123 +1141,7 @@ document.getElementById('nominalsShowNone').onclick = (e) => {
   });
 };
 
-document.getElementById('brokerFile').addEventListener('change', async (e) => {
-  if (!e.target.files.length) return;
-  try {
-    const text = await e.target.files[0].text();
-    const rows = parseCsv(text);
-    const priceMap = new Map();
-    const seenCusips = new Set();
-    
-    // Robust cleaner for ="TEXT", "TEXT", =TEXT, or TEXT
-    const clean = (val) => (val || "").replace(/^=?["']*/, '').replace(/["']*$/, '').trim();
 
-    rows.forEach(row => {
-      // Normalize row keys to lowercase/trimmed
-      const normalizedRow = {};
-      for (const key in row) {
-        normalizedRow[key.toLowerCase().trim()] = row[key];
-      }
-
-      let cusip = null;
-      let priceStr = null;
-
-      // 1. Identify CUSIP
-      if (normalizedRow["cusip"]) {
-        cusip = clean(normalizedRow["cusip"]);
-      } else if (normalizedRow["description"]) {
-        const desc = normalizedRow["description"];
-        const match = desc.match(/[A-Z0-9]{9}/);
-        if (match) cusip = match[0];
-      }
-
-      // 2. Identify Price (Prefer Ask for yield curve, fallback to generic or Bid)
-      priceStr = normalizedRow["price ask"] || normalizedRow["ask price"] || 
-                 normalizedRow["price"] || 
-                 normalizedRow["price bid"] || normalizedRow["bid price"];
-
-      if (cusip && priceStr && !seenCusips.has(cusip)) {
-        // Only accept if it's a known TIPS CUSIP from our FedInvest data
-        if (!rawYieldsData || !rawYieldsData.some(r => r.cusip === cusip)) {
-          return;
-        }
-        const price = parseFloat(clean(priceStr).replace(/,/g, ''));
-        if (!isNaN(price)) {
-          priceMap.set(cusip, price);
-        }
-        seenCusips.add(cusip);
-      }
-    });
-
-    console.log(`Broker CSV: Found ${priceMap.size} valid TIPS prices.`);
-
-    if (priceMap.size === 0) {
-      alert("No valid TIPS prices found in the CSV. (Supported: Schwab Brokerage, Fidelity Quotes)");
-      e.target.value = '';
-      return;
-    }
-    brokerPrices = priceMap;
-    const chkBroker = document.getElementById('chkTipsBroker');
-    chkBroker.disabled = false;
-    chkBroker.checked = true;
-    document.getElementById('tipsBrokerDateLabel').textContent = ' (' + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ')';
-    document.getElementById('tipsFedDateLabel').textContent = rawYieldsData?.[0]?.settlementDate ? ` (${rawYieldsData[0].settlementDate})` : '';
-    document.getElementById('resetTips').style.display = 'block';
-    processAndRenderTips();
-  } catch (err) {
-    alert("Error parsing CSV: " + err.message);
-  }
-});
-
-document.getElementById('resetTips').onclick = () => {
-  brokerPrices = null;
-  document.getElementById('brokerFile').value = '';
-  document.getElementById('chkTipsBroker').disabled = true;
-  document.getElementById('chkTipsBroker').checked = false;
-  document.getElementById('tipsBrokerDateLabel').textContent = '';
-  document.getElementById('resetTips').style.display = 'none';
-  document.getElementById('chkTipsFed').checked = true;
-  processAndRenderTips();
-};
-
-document.getElementById('fidelityNominalsFile').addEventListener('change', async (e) => {
-  if (!e.target.files.length) return;
-  try {
-    const text = await e.target.files[0].text();
-    const { bonds, downloadDate } = parseFidelityNominals(text);
-    if (bonds.length === 0) {
-      alert('No valid Treasury securities found in the CSV.');
-      e.target.value = '';
-      return;
-    }
-    fidelityNominalsData = bonds;
-    fidelityNominalsDate = downloadDate;
-    const chkFid = document.getElementById('chkFidelity');
-    chkFid.disabled = false;
-    chkFid.checked = true;
-    document.getElementById('fidelityDateLabel').textContent = downloadDate ? ` (${downloadDate})` : '';
-    document.getElementById('fedInvestDateLabel').textContent = rawNominalsData?.[0]?.settlementDate ? ` (${rawNominalsData[0].settlementDate})` : '';
-    document.getElementById('resetTreasuries').style.display = 'block';
-    // Reset date range so it re-initializes from the union of both sources
-    document.getElementById('startMaturity').value = '';
-    document.getElementById('endMaturity').value = '';
-    processAndRenderNominals();
-  } catch (err) {
-    alert('Error parsing Fidelity CSV: ' + err.message);
-  }
-});
-
-document.getElementById('resetTreasuries').onclick = () => {
-  fidelityNominalsData = null;
-  fidelityNominalsDate = null;
-  document.getElementById('fidelityNominalsFile').value = '';
-  document.getElementById('chkFidelity').disabled = true;
-  document.getElementById('chkFidelity').checked = false;
-  document.getElementById('fidelityDateLabel').textContent = '';
-  document.getElementById('resetTreasuries').style.display = 'none';
-  document.getElementById('chkFedInvest').checked = true;
-  processAndRenderNominals();
-};
 
 // Unified Source Change Handlers
 ['chkTipsFed', 'chkTipsBroker', 'chkFedInvest', 'chkFidelity'].forEach(id => {

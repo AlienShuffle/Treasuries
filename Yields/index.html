@@ -116,28 +116,18 @@
     <div id="sourceRow">
       <!-- TIPS Source UI -->
       <div id="tipsSourceUI" style="display:flex; gap:12px; align-items:center;">
-        <div class="source-card">
-          <label class="source-label">Load Broker CSV:</label>
-          <input type="file" id="brokerFile" accept=".csv" style="font-size:11px;">
-        </div>
         <div id="tipsCheckboxes" class="source-checkboxes">
           <label><input type="checkbox" id="chkTipsFed" checked> FedInvest<span id="tipsFedDateLabel" class="source-date"></span></label>
-          <label><input type="checkbox" id="chkTipsBroker" disabled> Broker<span id="tipsBrokerDateLabel" class="source-date"></span></label>
+          <label><input type="checkbox" id="chkTipsBroker" disabled> Fidelity<span id="tipsBrokerDateLabel" class="source-date"></span></label>
         </div>
-        <button id="resetTips" class="reset-btn" style="display:none;">Reset</button>
       </div>
 
       <!-- Treasuries Source UI -->
       <div id="treasuriesSourceUI" style="display:none; gap:12px; align-items:center;">
-        <div class="source-card">
-          <label class="source-label">Load Fidelity CSV:</label>
-          <input type="file" id="fidelityNominalsFile" accept=".csv" style="font-size:11px;">
-        </div>
         <div class="source-checkboxes">
           <label><input type="checkbox" id="chkFedInvest" checked> FedInvest<span id="fedInvestDateLabel" class="source-date"></span></label>
           <label><input type="checkbox" id="chkFidelity" disabled> Fidelity<span id="fidelityDateLabel" class="source-date"></span></label>
         </div>
-        <button id="resetTreasuries" class="reset-btn" style="display:none;">Reset</button>
       </div>
 
       <div id="info-strip" style="margin-bottom:0; margin-left: auto; font-size: 12px; color: #64748b;"></div>
