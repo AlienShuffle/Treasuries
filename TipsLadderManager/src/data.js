@@ -1,7 +1,7 @@
 // data.js -- CSV fetch and parse (5.0_Computation_Modules.md)
 // Exports: parseCsv, fetchTipsData
 
-const BASE_URL = 'https://pub-ba11062b177640459f72e0a88d0261ae.r2.dev/TIPS';
+const BASE_URL = 'https://pub-ba11062b177640459f72e0a88d0261ae.r2.dev/Treasuries';
 
 export function parseCsv(text) {
   const lines = text.trim().split('\n').filter(l => l.trim());
