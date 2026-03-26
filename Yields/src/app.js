@@ -1248,6 +1248,7 @@ document.getElementById('nominalsTable').querySelector('thead').addEventListener
 document.getElementById('nominalsControls').addEventListener('change', (e) => {
   if (e.target.id === 'filterStrips') {
     nominalsShowStrips = e.target.checked;
+    savedZoom['treasuries'] = null;
     processAndRenderNominals();
     return;
   }
@@ -1255,6 +1256,7 @@ document.getElementById('nominalsControls').addEventListener('change', (e) => {
   if (!type) return;
   if (e.target.checked) nominalsTypeFilters.add(type);
   else nominalsTypeFilters.delete(type);
+  savedZoom['treasuries'] = null;
   processAndRenderNominals();
 });
 
