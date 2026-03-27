@@ -1,4 +1,4 @@
-# Yields: TIPS Seasonal Adjustments
+# YieldCurves: TIPS Seasonal Adjustments
 
 A browser-based tool for analyzing **Seasonally Adjusted (SA)** and **SA Outlier-adjusted (SAO)** TIPS yields. This project helps identify "cheap" or "rich" spots on the TIPS curve by removing predictable seasonal inflation noise.
 
@@ -9,10 +9,10 @@ A browser-based tool for analyzing **Seasonally Adjusted (SA)** and **SA Outlier
 - **SAO Trend Fitting**: See the institutional view of the yield curve via backwards-anchored linear regression.
 
 ## Getting Started
-- **Live Version**: [https://aerokam.github.io/Treasuries/Yields/](https://aerokam.github.io/Treasuries/Yields/)
+- **Live Version**: [https://aerokam.github.io/Treasuries/YieldCurves/](https://aerokam.github.io/Treasuries/YieldCurves/)
 - **Local Dev**:
   1. From the monorepo root: `npx serve .`
-  2. Open `http://localhost:8080/Yields/` in your browser. (Note: Root serving is required for shared components).
+  2. Open `http://localhost:8080/YieldCurves/` in your browser. (Note: Root serving is required for shared components).
 
 ## Knowledge Base
 - **[1.0 Seasonal Adjustments](./knowledge/1.0_Seasonal_Adjustments.md)**: The core multiplicative transform logic.

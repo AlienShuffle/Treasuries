@@ -2,7 +2,7 @@
 import { yieldFromPrice } from '../../shared/src/bond-math.js';
 import { handleChartKeydown } from '../../shared/src/chart-keys.js';
 
-console.log("Yields app.js loading...");
+console.log("YieldCurves app.js loading...");
 
 const R2_BASE_URL = 'https://pub-ba11062b177640459f72e0a88d0261ae.r2.dev';
 const YIELDS_CSV_URL = `${R2_BASE_URL}/Treasuries/Yields.csv`;
@@ -757,13 +757,18 @@ function renderNominalsChart(fedBonds, fidBonds) {
   const allY = allPoints.map(d => d.y);
   let scaleY = allY;
   if (nominalsClipOutliers && allY.length >= 4) {
-    const sorted = [...allY].sort((a, b) => a - b);
+    // Use Notes yields for IQR (outliers live in notes; bills/bonds widen IQR too much)
+    const notesY = activeSeries.filter(s => s.label.includes('Notes')).flatMap(s => s.data).map(d => d.y);
+    const iqrSource = notesY.length >= 4 ? notesY : allY;
+    const sorted = [...iqrSource].sort((a, b) => a - b);
     const q1 = sorted[Math.floor(sorted.length * 0.25)];
     const q3 = sorted[Math.floor(sorted.length * 0.75)];
     const iqr = q3 - q1;
-    const lo = q1 - 1.5 * iqr, hi = q3 + 1.5 * iqr;
+    const fence = Math.max(1.0 * iqr, 0.5);
+    const lo = q1 - fence, hi = q3 + fence;
     const clipped = allY.filter(y => y >= lo && y <= hi);
-    if (clipped.length > 0) scaleY = clipped;
+    const excludedFrac = (allY.length - clipped.length) / allY.length;
+    if (clipped.length > 0 && excludedFrac <= 0.05) scaleY = clipped;
   }
   const minYRaw = Math.min(...scaleY), maxYRaw = Math.max(...scaleY);
   const minY = Math.floor(minYRaw * 20) / 20;
@@ -796,7 +801,7 @@ function renderNominalsChart(fedBonds, fidBonds) {
       responsive: true,
       maintainAspectRatio: false,
       animation: false,
-      interaction: { mode: 'index', intersect: false },
+      interaction: { mode: 'nearest', axis: 'x', intersect: false },
       scales: {
         x: {
           type: 'time',
@@ -1078,7 +1083,7 @@ function renderChart(fedBonds, brokerBonds) {
       responsive: true,
       maintainAspectRatio: false,
       animation: false,
-      interaction: { mode: 'index', intersect: false },
+      interaction: { mode: 'nearest', axis: 'x', intersect: false },
       scales: {
         x: { type: 'time', min: minX, max: maxX, time: { unit: 'year', displayFormats: { year: 'MMM yyyy' } }, grid: { color: 'rgba(0,0,0,0.05)' } },
         y: { type: 'linear', title: { display: true, text: 'Yield (%)' }, min: minY, max: maxY, ticks: { stepSize: 0.25, callback: (v) => v.toFixed(2) } }
@@ -1129,13 +1134,22 @@ function rescaleToVisible(chart) {
   if (allVisibleY.length === 0) return;
 
   if (nominalsClipOutliers && chartTab === 'treasuries' && allVisibleY.length >= 4) {
-    const sorted = [...allVisibleY].sort((a, b) => a - b);
+    // Use Notes yields for IQR (outliers live in notes; bills/bonds widen IQR too much)
+    const notesVisibleY = [];
+    chart.data.datasets.forEach((dataset, i) => {
+      if (!chart.isDatasetVisible(i) || !dataset.label.includes('Notes')) return;
+      dataset.data.forEach(p => notesVisibleY.push(p.y));
+    });
+    const iqrSource = notesVisibleY.length >= 4 ? notesVisibleY : allVisibleY;
+    const sorted = [...iqrSource].sort((a, b) => a - b);
     const q1 = sorted[Math.floor(sorted.length * 0.25)];
     const q3 = sorted[Math.floor(sorted.length * 0.75)];
     const iqr = q3 - q1;
-    const lo = q1 - 1.5 * iqr, hi = q3 + 1.5 * iqr;
+    const fence = Math.max(1.0 * iqr, 0.5);
+    const lo = q1 - fence, hi = q3 + fence;
     const clipped = allVisibleY.filter(y => y >= lo && y <= hi);
-    if (clipped.length > 0) allVisibleY = clipped;
+    const excludedFrac = (allVisibleY.length - clipped.length) / allVisibleY.length;
+    if (clipped.length > 0 && excludedFrac <= 0.05) allVisibleY = clipped;
   }
 
   const visibleMinY = Math.min(...allVisibleY);

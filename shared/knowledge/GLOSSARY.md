@@ -35,6 +35,18 @@ Basic building blocks for all Treasury securities.
 ## 2.0 Bond Fundamentals
 General concepts applicable to all fixed-income securities (Bills, Notes, Bonds).
 
+### Treasury Bill
+**Synonym:** T-Bill
+**Definition:** A short-term Treasury security maturing in one year or less. They are zero-coupon instruments sold at a discount to par.
+
+### Treasury Note
+**Synonym:** T-Note
+**Definition:** A medium-term Treasury security maturing in 2 to 10 years. They pay interest semi-annually at a fixed rate.
+
+### Treasury Bond
+**Synonym:** T-Bond
+**Definition:** A long-term Treasury security maturing in more than 10 years (typically 20 or 30 years). They pay interest semi-annually at a fixed rate.
+
 ### Par Value (Nominal)
 **Definition:** The current principal value of a nominal security. For standard Treasuries, this equals Face Value.
 **Formula:** `Par Value = Face Value`

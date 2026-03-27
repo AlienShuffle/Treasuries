@@ -6,7 +6,7 @@ A collection of free, open-source tools for the **Bogleheads** community to mana
 
 ## Projects
 - **TipsLadderManager**: Browser-based TIPS ladder design and rebalancing.
-- **Yields**: Seasonal Adjustment (SA) analysis for TIPS and Nominal Treasury yield curves.
+- **YieldCurves**: Seasonal Adjustment (SA) analysis for TIPS and Nominal Treasury yield curves.
 - **YieldsMonitor**: Real-time and historical Treasury yield monitoring across the curve.
 - **TreasuryAuctions**: Comprehensive Treasury auction results and filtering.
 

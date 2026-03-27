@@ -10,10 +10,10 @@ const FED_YIELDS_CSV = [
   SETTLE,
   'type,cusip,maturity,coupon,datedDateCpi,price,yield',
   'MARKET BASED BILL,912797TB3,2026-06-26,0.000,,99.060,0.000',
-  'MARKET BASED NOTE,91282CBT7,2028-03-25,4.250,,100.000,4.250',
-  'MARKET BASED NOTE,91282CKH3,2031-03-25,4.350,,100.000,4.350',
-  'MARKET BASED BOND,912810PS1,2036-03-25,4.750,,100.000,4.750',
-  'MARKET BASED BOND,912810XX1,2056-03-25,4.850,,100.000,4.850',
+  'MARKET BASED NOTE,91282CBT7,2028-03-25,0.04250,,100.000,0.04250',
+  'MARKET BASED NOTE,91282CKH3,2031-03-25,0.04350,,100.000,0.04350',
+  'MARKET BASED BOND,912810PS1,2036-03-25,0.04750,,100.000,0.04750',
+  'MARKET BASED BOND,912810XX1,2056-03-25,0.04850,,100.000,0.04850',
   'TIPS,91282CCA7,2026-04-15,0.00125,262.25027,100.0625,0.000',
   'TIPS,912828S50,2026-07-15,0.00125,239.70132,101.4375,0.000',
   'TIPS,91282CDC2,2026-10-15,0.00125,273.25771,100.96875,0.000',
@@ -47,6 +47,38 @@ const FID_TIPS_CSV = [
   '="91282CDC2","N/A","UNITED STATES TREAS NTS SER AE-2026 0.12500% 10/15/2026","0.125","10/15/2026","AA1","--","100.680","100.738","-1.095","-1.197","-1.197","1.18943","119.751812","119.820799",CP D ',
 ].join('\n');
 
+// ─── Outlier mock: 52 nominals including 2 extreme low-yield notes ─────────────
+// Normal notes: 4.00–4.58%  |  Normal bonds: 4.60–5.17%
+// Extreme notes: 1.50%, 2.00% (both below lo≈3.63% with 1×IQR fence≈0.59)
+// excluded/total = 2/52 = 3.8% < 5% threshold → clip applies
+
+function makeFedOutlierCsv() {
+  const rows = [
+    SETTLE,
+    'type,cusip,maturity,coupon,datedDateCpi,price,yield',
+    'MARKET BASED NOTE,NLOW00001,2027-01-15,0.01500,,100.000,0.01500',
+    'MARKET BASED NOTE,NLOW00002,2028-01-15,0.02000,,100.000,0.02000',
+    'TIPS,91282CCA7,2026-04-15,0.00125,262.25027,100.0625,0.000',
+    'TIPS,912828S50,2026-07-15,0.00125,239.70132,101.4375,0.000',
+    'TIPS,91282CDC2,2026-10-15,0.00125,273.25771,100.96875,0.000',
+  ];
+  for (let i = 0; i < 30; i++) {
+    const y = (0.0400 + i * 0.0002).toFixed(5);
+    const cusip = `NORM${String(i).padStart(5, '0')}`;
+    const matYear = 2029 + Math.floor(i / 2);
+    const matMonth = i % 2 === 0 ? '01' : '07';
+    rows.push(`MARKET BASED NOTE,${cusip},${matYear}-${matMonth}-15,${y},,100.000,${y}`);
+  }
+  for (let i = 0; i < 20; i++) {
+    const y = (0.0460 + i * 0.0003).toFixed(5);
+    const cusip = `BNDX${String(i).padStart(5, '0')}`;
+    rows.push(`MARKET BASED BOND,${cusip},${2057 + i * 2}-01-15,${y},,100.000,${y}`);
+  }
+  return rows.join('\n');
+}
+
+const FED_YIELDS_CSV_OUTLIER = makeFedOutlierCsv();
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 async function setupRoutes(page) {
@@ -55,6 +87,15 @@ async function setupRoutes(page) {
   await page.route('**/misc/BondHolidaysSifma.csv', r => r.fulfill({ status: 200, contentType: 'text/csv', body: HOLIDAYS_CSV }));
   await page.route('**/Treasuries/FidelityTreasuries.csv', r => r.fulfill({ status: 200, contentType: 'text/csv', body: FID_TREASURIES_CSV }));
   await page.route('**/Treasuries/FidelityTips.csv', r => r.fulfill({ status: 200, contentType: 'text/csv', body: FID_TIPS_CSV }));
+}
+
+async function setupOutlierRoutes(page) {
+  await page.route('**/Treasuries/Yields.csv', r => r.fulfill({ status: 200, contentType: 'text/csv', body: FED_YIELDS_CSV_OUTLIER }));
+  await page.route('**/Treasuries/RefCpiNsaSa.csv', r => r.fulfill({ status: 200, contentType: 'text/csv', body: REF_CPI_CSV }));
+  await page.route('**/misc/BondHolidaysSifma.csv', r => r.fulfill({ status: 200, contentType: 'text/csv', body: HOLIDAYS_CSV }));
+  // No matching Fidelity CUSIPs — Market source inactive for this test
+  await page.route('**/Treasuries/FidelityTreasuries.csv', r => r.fulfill({ status: 200, contentType: 'text/csv', body: FID_TREASURIES_CSV.split('\n')[0] }));
+  await page.route('**/Treasuries/FidelityTips.csv', r => r.fulfill({ status: 200, contentType: 'text/csv', body: FID_TIPS_CSV.split('\n')[0] }));
 }
 
 async function getYBounds(page) {
@@ -125,19 +166,19 @@ test.describe('Treasuries tab — checkbox rescale', () => {
     expect(withBills.min).toBeLessThan(withoutBills.min);
   });
 
-  test('uncheck FedInvest rescales Y axis', async ({ page }) => {
-    const before = await getYBounds(page);
+  test('uncheck FedInvest removes FedInvest datasets from chart', async ({ page }) => {
+    const before = await page.evaluate(() => Chart.getChart(document.getElementById('yieldChart'))?.data.datasets.length);
     await page.click('#chkFedInvest');
-    const after = await getYBounds(page);
-    expect(after).not.toEqual(before);
+    const after = await page.evaluate(() => Chart.getChart(document.getElementById('yieldChart'))?.data.datasets.length);
+    expect(after).toBeLessThan(before);
   });
 
-  test('recheck FedInvest rescales Y axis', async ({ page }) => {
+  test('recheck FedInvest restores FedInvest datasets to chart', async ({ page }) => {
     await page.click('#chkFedInvest');
-    const marketOnly = await getYBounds(page);
+    const marketOnly = await page.evaluate(() => Chart.getChart(document.getElementById('yieldChart'))?.data.datasets.length);
     await page.click('#chkFedInvest');
-    const both = await getYBounds(page);
-    expect(both).not.toEqual(marketOnly);
+    const both = await page.evaluate(() => Chart.getChart(document.getElementById('yieldChart'))?.data.datasets.length);
+    expect(both).toBeGreaterThan(marketOnly);
   });
 
   test('uncheck Market rescales Y axis', async ({ page }) => {
@@ -258,5 +299,30 @@ test.describe('TIPS tab — checkbox rescale', () => {
     await page.click('#chkTipsBroker');
     const bounds = await getYBounds(page);
     expect(bounds).toBeNull();
+  });
+});
+
+// ─── Outlier clipping: bonds+notes combined ────────────────────────────────────
+
+test.describe('Treasuries tab — outlier clipping: bonds+notes combined', () => {
+  test.beforeEach(async ({ page }) => {
+    await setupOutlierRoutes(page);
+    await page.goto('./');
+    await expect(page.locator('#saTable tbody tr')).toHaveCount(3, { timeout: 10000 });
+    await page.click('[data-tab="treasuries"]');
+    // 52 nominals: 2 extreme notes + 30 normal notes + 20 normal bonds
+    await expect(page.locator('#nominalsTable tbody tr')).toHaveCount(52, { timeout: 10000 });
+  });
+
+  test('none → bonds → notes: clip outliers excludes extreme low-yield notes from Y scale', async ({ page }) => {
+    // Reproduce bug path: start from default (all checked), uncheck to none, then add bonds, then notes
+    await page.click('#filterNotes');          // uncheck Notes
+    await page.click('#filterBonds');          // uncheck Bonds → nothing selected
+    await page.click('#filterBonds');          // recheck Bonds only
+    await page.click('#filterNotes');          // add Notes → bonds + notes (includes 1.5%, 2.0% extreme notes)
+
+    const bounds = await getYBounds(page);
+    // Clip Outliers default on; with 1×IQR: lo≈3.63%, extreme notes at 1.5% and 2.0% excluded
+    expect(bounds.min).toBeGreaterThan(2.5);
   });
 });

@@ -7,7 +7,7 @@ This repository contains multiple projects for Treasury Inflation-Protected Secu
   - `knowledge/`: Fundamental TIPS and Bond concepts (1.0, 2.1).
   - `src/`: Core financial math (e.g., `bond-math.js`).
 - `TipsLadderManager/`: The browser-based tool for designing and rebalancing TIPS ladders.
-- `Yields/`: (New) TIPS Seasonal Adjustments project.
+- `YieldCurves/`: (New) TIPS Seasonal Adjustments project.
 - `YieldsMonitor/`: (New) Tool for monitoring real-time and historical Treasury yields.
 - `TreasuryAuctions/`: (New) Tool for monitoring Treasury auction results.
 
@@ -21,16 +21,16 @@ To provide a suite of transparent, first-principles tools for managing inflation
 
 ## Technical Standards and Context
 
-- `Yields/`: (New) TIPS Seasonal Adjustments project.
+- `YieldCurves/`: (New) TIPS Seasonal Adjustments project.
 - **Local Testing**:
   - TipsLadderManager: `http://localhost:8080/TipsLadderManager/`
-  - Yields: `http://localhost:8080/Yields/`
+  - YieldCurves: `http://localhost:8080/YieldCurves/`
   - YieldsMonitor: `http://localhost:8080/YieldsMonitor/`
   - TreasuryAuctions: `http://localhost:8080/TreasuryAuctions/`
 - **Production (GitHub Pages)**:
   - Portal: `https://aerokam.github.io/Treasuries/`
   - TipsLadderManager: `https://aerokam.github.io/Treasuries/TipsLadderManager/`
-  - Yields: `https://aerokam.github.io/Treasuries/Yields/`
+  - YieldCurves: `https://aerokam.github.io/Treasuries/YieldCurves/`
   - YieldsMonitor: `https://aerokam.github.io/Treasuries/YieldsMonitor/`
   - TreasuryAuctions: `https://aerokam.github.io/Treasuries/TreasuryAuctions/`
 - **E2E Tests**: Configured for port 8080 at `127.0.0.1`.
