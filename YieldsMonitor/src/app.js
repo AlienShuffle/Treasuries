@@ -51,6 +51,26 @@ let activeSymbols = new Set(['US10YTIPS', 'US30YTIPS', 'US10Y', 'US30Y']);
 let activeRange = '2D';
 let activeTab = 'timeseries';
 
+// Global formatters to avoid expensive instantiation in hot loops
+const ET_YMD_FMT = new Intl.DateTimeFormat('en-US', {
+  timeZone: 'America/New_York',
+  year: 'numeric', month: '2-digit', day: '2-digit'
+});
+
+const ET_FULL_FMT = new Intl.DateTimeFormat('en-US', {
+  timeZone: 'America/New_York', hourCycle: 'h23',
+  year: 'numeric', month: 'numeric', day: 'numeric',
+  hour: 'numeric', minute: 'numeric', second: 'numeric'
+});
+
+const ET_HM_FMT = new Intl.DateTimeFormat('en-US', {
+  timeZone: 'America/New_York', hourCycle: 'h23',
+  year: 'numeric', month: '2-digit', day: '2-digit',
+  hour: 'numeric', minute: 'numeric'
+});
+
+let lastDayCache = { start: 0, end: 0, str: "" };
+
 const SYMBOL_LABELS = {
   'US1M': '1-Month', 'US2M': '2-Month', 'US3M': '3-Month', 'US6M': '6-Month',
   'US1Y': '1-Year', 'US2Y': '2-Year', 'US5Y': '5-Year', 'US10Y': '10-Year', 'US30Y': '30-Year',
@@ -405,17 +425,10 @@ function parseSourceTime(tt) {
   if (s.length >= 14) second = parseInt(s.substring(12, 14), 10);
   
   // CNBC data is Eastern Time. Parse it correctly regardless of browser timezone.
-  const formatter = new Intl.DateTimeFormat('en-US', {
-    timeZone: 'America/New_York',
-    hourCycle: 'h23',
-    year: 'numeric', month: 'numeric', day: 'numeric',
-    hour: 'numeric', minute: 'numeric', second: 'numeric'
-  });
-  
   // Converge on the correct UTC moment. We want d such that wall-time in ET matches our parts.
   let d = new Date(Date.UTC(year, month, day, hour, minute, second));
   for (let i = 0; i < 2; i++) {
-    const p = formatter.formatToParts(d).reduce((acc, part) => ({ ...acc, [part.type]: part.value }), {});
+    const p = ET_FULL_FMT.formatToParts(d).reduce((acc, part) => ({ ...acc, [part.type]: part.value }), {});
     // Calculate difference between what wall-time ET says it is, and what we want it to be.
     const diff = Date.UTC(year, month, day, hour, minute, second) - Date.UTC(parseInt(p.year, 10), parseInt(p.month, 10) - 1, parseInt(p.day, 10), parseInt(p.hour, 10), parseInt(p.minute, 10), parseInt(p.second, 10));
     if (diff === 0) break;
@@ -426,24 +439,27 @@ function parseSourceTime(tt) {
 
 function getEtDateStr(date) {
   // Returns "MM/DD/YYYY" for the ET wall-clock date of the given UTC instant.
-  const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone: 'America/New_York',
-    year: 'numeric', month: '2-digit', day: '2-digit'
-  }).formatToParts(date).reduce((a, pt) => ({ ...a, [pt.type]: pt.value }), {});
-  return `${parts.month}/${parts.day}/${parts.year}`;
+  const ts = date instanceof Date ? date.getTime() : +date;
+  if (ts >= lastDayCache.start && ts < lastDayCache.end) return lastDayCache.str;
+
+  const parts = ET_YMD_FMT.formatToParts(date).reduce((a, pt) => ({ ...a, [pt.type]: pt.value }), {});
+  const str = `${parts.month}/${parts.day}/${parts.year}`;
+
+  // Update cache boundaries
+  const y = +parts.year, m = +parts.month - 1, d = +parts.day;
+  const midnight = makeEtMoment(y, m, d, 0);
+  const nextMidnight = makeEtMoment(y, m, d + 1, 0);
+  lastDayCache = { start: midnight.getTime(), end: nextMidnight.getTime(), str };
+
+  return str;
 }
 
 function makeEtMoment(year, month0, day, hour) {
   // Returns a Date (UTC instant) that represents `hour:00:00 ET` on the given ET calendar date.
   // Same iterative convergence approach as parseSourceTime.
-  const fmt = new Intl.DateTimeFormat('en-US', {
-    timeZone: 'America/New_York', hourCycle: 'h23',
-    year: 'numeric', month: 'numeric', day: 'numeric',
-    hour: 'numeric', minute: 'numeric', second: 'numeric'
-  });
   let d = new Date(Date.UTC(year, month0, day, hour, 0, 0));
   for (let i = 0; i < 2; i++) {
-    const p = fmt.formatToParts(d).reduce((a, pt) => ({ ...a, [pt.type]: pt.value }), {});
+    const p = ET_FULL_FMT.formatToParts(d).reduce((a, pt) => ({ ...a, [pt.type]: pt.value }), {});
     const diff = Date.UTC(year, month0, day, hour, 0, 0) -
       Date.UTC(+p.year, +p.month - 1, +p.day, +p.hour, +p.minute, +p.second);
     if (diff === 0) break;
@@ -454,10 +470,7 @@ function makeEtMoment(year, month0, day, hour) {
 
 function isAfterHoursEt(tsMs) {
   // Returns true if the UTC instant falls outside 8:00–17:00 ET wall-clock time.
-  const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone: 'America/New_York', hourCycle: 'h23',
-    hour: 'numeric', minute: 'numeric'
-  }).formatToParts(new Date(tsMs)).reduce((a, p) => ({ ...a, [p.type]: +p.value }), {});
+  const parts = ET_FULL_FMT.formatToParts(new Date(tsMs)).reduce((a, p) => ({ ...a, [p.type]: +p.value }), {});
   const mins = parts.hour * 60 + parts.minute;
   return mins < 8 * 60 || mins >= 17 * 60;
 }
