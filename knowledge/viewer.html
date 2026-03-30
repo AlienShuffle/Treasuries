@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Knowledge Viewer</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#0d0d1a;color:#c0c8e0;font-family:'Segoe UI',sans-serif;font-size:14px;line-height:1.7;padding:32px 48px;max-width:900px;margin:0 auto}
+nav{margin-bottom:24px;display:flex;justify-content:space-between;align-items:center}
+nav a{color:#5577cc;text-decoration:none;font-size:12px;letter-spacing:.5px}
+nav a:hover{color:#aabbff}
+#content { opacity: 0; transition: opacity 0.3s; }
+#content.loaded { opacity: 1; }
+h1,h2,h3,h4{color:#9090ee;margin:1.6em 0 .5em;font-weight:500}
+h1{font-size:1.5em;border-bottom:1px solid #1e1e3a;padding-bottom:.4em}
+h2{font-size:1.2em}
+h3{font-size:1em;color:#7788cc}
+p{margin:.7em 0}
+a{color:#5577cc}
+a:hover{color:#aabbff}
+code{background:#141428;color:#aaddaa;padding:1px 5px;border-radius:3px;font-size:.9em}
+pre{background:#0a0a1a;border:1px solid #1e1e3a;border-radius:6px;padding:14px 18px;overflow-x:auto;margin:1em 0}
+pre code{background:none;padding:0;font-size:.85em;color:#b0c4b0}
+table{border-collapse:collapse;width:100%;margin:1em 0;font-size:.9em}
+th{background:#141428;color:#8888cc;font-weight:500;text-align:left;padding:8px 12px;border:1px solid #222244}
+td{padding:7px 12px;border:1px solid #1a1a32;vertical-align:top}
+tr:nth-child(even) td{background:#0f0f22}
+blockquote{border-left:3px solid #334;margin:1em 0;padding:.5em 1em;color:#8899aa}
+hr{border:none;border-top:1px solid #1e1e3a;margin:2em 0}
+ul,ol{padding-left:1.4em;margin:.5em 0}
+li{margin:.2em 0}
+.error{color:#ff6666;padding:20px;background:#2a1a1a;border-radius:6px;border:1px solid #442222}
+</style>
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+</head>
+<body>
+<nav>
+  <a href="./KNOWLEDGE_MAP.html">← Back to Knowledge Map</a>
+  <span id="file-path" style="font-size: 11px; color: #555577;"></span>
+</nav>
+<main id="content">Loading...</main>
+
+<script>
+async function loadMarkdown() {
+  const params = new URLSearchParams(window.location.search);
+  const file = params.get('file');
+  const contentEl = document.getElementById('content');
+  const pathEl = document.getElementById('file-path');
+
+  if (!file) {
+    contentEl.innerHTML = '<div class="error">No file specified.</div>';
+    return;
+  }
+
+  pathEl.textContent = file;
+  document.title = file.split('/').pop() + ' - Knowledge Viewer';
+
+  try {
+    // Determine the base path based on whether it's absolute or relative to repo root
+    // For end users on GitHub Pages, we fetch relative to the current location or root
+    let fetchPath = file;
+    if (file.startsWith('/')) {
+        // If it starts with /md/, we strip it and fetch from root
+        if (file.startsWith('/md/')) {
+            fetchPath = '../' + file.substring(4);
+        } else {
+            fetchPath = '..' + file;
+        }
+    }
+
+    const response = await fetch(fetchPath);
+    if (!response.ok) throw new Error(`Failed to load ${file}: ${response.statusText}`);
+    
+    const markdown = await response.text();
+    contentEl.innerHTML = marked.parse(markdown);
+    contentEl.classList.add('loaded');
+  } catch (err) {
+    contentEl.innerHTML = `<div class="error">
+      <h2>Error loading document</h2>
+      <p>${err.message}</p>
+      <p>Make sure you are running a local server or viewing on GitHub Pages.</p>
+    </div>`;
+    contentEl.classList.add('loaded');
+  }
+}
+
+window.addEventListener('DOMContentLoaded', loadMarkdown);
+</script>
+</body>
+</html>
