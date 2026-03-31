@@ -508,6 +508,12 @@ async function loadStatus(){
     statusData = await r.json();
     document.getElementById('fetched-at').textContent='Updated '+fmtAge(statusData.fetchedAt);
     applyStatusDots();
+    // Re-render open drill panel so last-run info and status chips reflect fresh data
+    const drillView = document.getElementById('drill-view');
+    if(drillView.classList.contains('open') && selectedId){
+      const node = nodeMap[selectedId];
+      if(node) openDrill(node);
+    }
   }catch(e){
     document.getElementById('fetched-at').textContent='Status unavailable';
   }
@@ -798,11 +804,19 @@ function renderWfChip(wf){
 
 function renderLocalJobChip(job){
   const nextRun=job.nextRunAt?'next '+fmtRelTime(job.nextRunAt):'';
+  let lastRunHtml='';
+  if(job.lastRunAt){
+    const ok=job.lastExitCode===0;
+    const dot=ok?'#22c55e':'#ef4444';
+    const label=ok?'OK':'Failed (code '+job.lastExitCode+')';
+    lastRunHtml=`<div class="wf-meta" style="gap:5px"><span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${dot};flex-shrink:0"></span><span>Last run ${fmtAge(job.lastRunAt)} — ${label}</span></div>`;
+  }
   return `<div class="wf-chip">
     <div class="wf-chip-top">
       <div class="wf-dot"></div>
       <div class="wf-label">${job.label}</div>
     </div>
+    ${lastRunHtml}
     ${nextRun?`<div class="wf-meta"><span>${nextRun}</span></div>`:''}
     <div class="wf-actions">
       <button class="pi-btn run" data-run-job="${job.id}">▶ Run locally</button>
@@ -959,7 +973,7 @@ async function runJob(jobId, btn){
       const {type,text}=JSON.parse(e.data);
       pre.textContent+=text;
       logEl.scrollTop=logEl.scrollHeight;
-      if(type==='exit'){ es.close(); btn.disabled=false; btn.textContent='▶ Run locally'; }
+      if(type==='exit'){ es.close(); btn.disabled=false; btn.textContent='▶ Run locally'; loadStatus(); }
     };
     es.onerror=()=>{ es.close(); btn.disabled=false; btn.textContent='▶ Run locally'; };
   }catch(e){ btn.disabled=false; btn.textContent='▶ Run locally'; }

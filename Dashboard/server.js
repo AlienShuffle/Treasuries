@@ -280,6 +280,9 @@ APP_CONFIGS.forEach(cfg => {
 const jobsPath = join(__dirname, 'jobs.json');
 let jobs = existsSync(jobsPath) ? JSON.parse(readFileSync(jobsPath, 'utf8')) : [];
 
+// In-memory run history: { [jobId]: { lastRunAt: ISO, exitCode: number } }
+const jobHistory = {};
+
 // ── Data fetchers (deduplicated per request) ───────────────────────────────────
 async function fetchR2StatusBatch(keys) {
   const out = {};
@@ -366,6 +369,7 @@ app.get('/api/status', async (_req, res) => {
         .map(j => ({
           id: j.id, label: j.label, cmd: j.cmd,
           ...(j.windowsTaskNames ? { nextRunAt: getWindowsTaskNextRun(j.windowsTaskNames) } : {}),
+          ...(jobHistory[j.id] ? { lastRunAt: jobHistory[j.id].lastRunAt, lastExitCode: jobHistory[j.id].exitCode } : {}),
         }));
       const alsoUsedBy = p.r2Key
         ? (r2KeyAppMap[p.r2Key] || []).filter(l => l !== cfg.label)
@@ -481,8 +485,8 @@ app.get('/api/preview', async (req, res) => {
   res.status(400).json({ error: 'source must be local or r2' });
 });
 
-// Run local job via SSE
-app.post('/api/run/:jobId', (req, res) => {
+// Run local job via SSE (GET so EventSource works)
+app.get('/api/run/:jobId', (req, res) => {
   const job = jobs.find(j => j.id === req.params.jobId);
   if (!job) return res.status(404).json({ error: 'Job not found' });
 
@@ -499,7 +503,11 @@ app.post('/api/run/:jobId', (req, res) => {
   child.stdout.on('data', d => send('stdout', d.toString()));
   child.stderr.on('data', d => send('stderr', d.toString()));
   child.on('error', e => send('error', `Error: ${e.message}\n`));
-  child.on('close', code => { send('exit', `\n● Exited with code ${code}\n`); res.end(); });
+  child.on('close', code => {
+    jobHistory[job.id] = { lastRunAt: new Date().toISOString(), exitCode: code };
+    send('exit', `\n● Exited with code ${code}\n`);
+    res.end();
+  });
   req.on('close', () => child.kill());
 });
 
