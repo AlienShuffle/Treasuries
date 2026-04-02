@@ -19,7 +19,7 @@ if (existsSync(_envPath)) {
 
 const FISCALDATA_URL = 'https://api.fiscaldata.treasury.gov/services/api/fiscal_service/v1/accounting/od/auctions_query';
 const R2_KEY = 'Treasuries/Auctions.csv';
-const R2_BASE_URL = 'https://pub-ba11062b177640459f72e0a88d0261ae.r2.dev';
+const R2_BASE_URL = (process.env.R2_BASE_URL || 'https://pub-ba11062b177640459f72e0a88d0261ae.r2.dev').replace(/\/+$/,'');
 
 // ── R2 upload ─────────────────────────────────────────────────────────────────
 async function uploadToR2(key, body) {

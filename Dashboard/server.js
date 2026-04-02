@@ -21,7 +21,7 @@ loadEnv(join(REPO_ROOT, '.env'));
 const PORT = process.env.PORT || 3737;
 const GH_OWNER = 'aerokam';
 const GH_REPO = 'Treasuries';
-const R2_BASE = 'https://pub-ba11062b177640459f72e0a88d0261ae.r2.dev';
+const R2_BASE = (process.env.R2_BASE_URL || 'https://pub-ba11062b177640459f72e0a88d0261ae.r2.dev').replace(/\/+$/,'');
 
 const WORKFLOW_LABELS = {
   'get-yields-fedinvest.yml':   'FedInvest yield fetch',

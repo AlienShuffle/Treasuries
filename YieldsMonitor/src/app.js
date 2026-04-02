@@ -412,7 +412,10 @@ function buildUrl(symbol, timeRange) {
   return base + "?" + Object.entries(params).map(([k, v]) => k + "=" + encodeURIComponent(v)).join("&");
 }
 
-const R2_HISTORY_URL = 'https://pub-ba11062b177640459f72e0a88d0261ae.r2.dev/Treasuries/yield-history';
+const R2_HISTORY_URL = (
+  (typeof window !== 'undefined' && window.R2_BASE_URL ? window.R2_BASE_URL.replace(/\/+$/,'') : null) ||
+  'https://pub-ba11062b177640459f72e0a88d0261ae.r2.dev'
+) + '/Treasuries/yield-history';
 
 function parseSourceTime(tt) {
   if (!tt) return null;

@@ -4,7 +4,11 @@ import { handleChartKeydown, setupAxisWheelZoom } from '../../shared/src/chart-k
 
 console.log("YieldCurves app.js loading...");
 
-const R2_BASE_URL = 'https://pub-ba11062b177640459f72e0a88d0261ae.r2.dev';
+const R2_BASE_URL = (
+  (typeof process !== 'undefined' && process.env && process.env.R2_BASE_URL) ||
+  (typeof window !== 'undefined' && window.R2_BASE_URL) ||
+  'https://pub-ba11062b177640459f72e0a88d0261ae.r2.dev'
+).replace(/\/+$/,'');
 const YIELDS_CSV_URL = `${R2_BASE_URL}/Treasuries/Yields.csv`;
 const REF_CPI_CSV_URL = `${R2_BASE_URL}/Treasuries/RefCpiNsaSa.csv`;
 const HOLIDAYS_CSV_URL = `${R2_BASE_URL}/misc/BondHolidaysSifma.csv`;

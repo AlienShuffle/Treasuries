@@ -171,7 +171,7 @@ body{font-family:system-ui,sans-serif;font-size:13px;margin:0;background:#f1f5f9
 // DATA: nodes, edges, metadata
 // ─────────────────────────────────────────────
 const GH_BASE = 'https://github.com/aerokam/Treasuries/blob/main';
-const R2_BASE = 'https://pub-ba11062b177640459f72e0a88d0261ae.r2.dev';
+const R2_BASE = (window.R2_BASE_URL || 'https://pub-ba11062b177640459f72e0a88d0261ae.r2.dev').replace(/\/+$/,'');
 
 const NODES = [
   // External entities (cx, cy = center)

@@ -233,8 +233,9 @@ function yieldFromPrice(cleanPrice, coupon, settleDateStr, maturityStr) {
 
 // ─── Main ─────────────────────────────────────────────────────────────────────
 async function main() {
-  const R2_BASE = 'https://pub-ba11062b177640459f72e0a88d0261ae.r2.dev';
-  const R2_BASE_URL = `${R2_BASE}/TIPS`;
+  const r2Base = (process.env.R2_BASE_URL || 'https://pub-ba11062b177640459f72e0a88d0261ae.r2.dev').replace(/\/+$/,'');
+  const R2_BASE = r2Base;
+  const R2_BASE_URL = `${r2Base}/TIPS`;
 
   // Check bond market holidays — skip cleanly on non-trading days
   const today = todayET();

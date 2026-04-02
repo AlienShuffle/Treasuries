@@ -7,7 +7,8 @@ dotenv.config({ path: path.join(__dirname, '../../.env') });
 import { uploadToR2 } from './r2.js';
 
 const OBJECT_KEY = "Treasuries/RefCpiNsaSa.csv";
-const CPI_CSV_URL = "https://pub-ba11062b177640459f72e0a88d0261ae.r2.dev/bls/CPI.csv";
+const R2_BASE_URL = (process.env.R2_BASE_URL || 'https://pub-ba11062b177640459f72e0a88d0261ae.r2.dev').replace(/\/+$/,'');
+const CPI_CSV_URL = `${R2_BASE_URL}/bls/CPI.csv`;
 
 async function calcAndUploadRefCpi() {
   console.log(`Fetching CPI data from ${CPI_CSV_URL}...`);
