@@ -9,7 +9,6 @@ dotenv.config({ path: path.join(__dirname, '../../.env') });
 // I'll refactor them to export functions if needed, or just use child_process.
 
 import { execSync } from 'child_process';
-import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
